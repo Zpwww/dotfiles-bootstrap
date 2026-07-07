@@ -1,0 +1,8 @@
+# 明文 vault 绝不提交
+bootstrap.vault.env
+*.env
+
+# 系统/缓存
+.DS_Store
+__pycache__/
+*.pyc
