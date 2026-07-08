@@ -62,10 +62,10 @@ ensure_clt() {
     log "CLT 已就绪。"
     return
   fi
-  log "触发 CLT 安装窗口，请点【安装】并等待完成。"
+  log "触发 CLT 安装窗口（这是苹果弹的系统窗口）：请点【安装】，等它下载完成（约几分钟）。"
   xcode-select --install 2>/dev/null || true
   until xcode-select -p >/dev/null 2>&1; do
-    printf "\r\033[K等待 CLT 安装完成..."
+    printf "\r\033[K⏳ 正在等待 CLT 安装完成（在弹窗里点了【安装】后耐心等）..."
     sleep 5
   done
   printf "\r\033[K"
@@ -73,10 +73,15 @@ ensure_clt() {
 }
 
 ensure_sudo() {
-  echo "接下来 macOS 会要求输入一次本机开机密码，用于授权安装 Homebrew。"
+  echo ""
+  echo "----------------------------------------------------"
+  echo "🔑 需要授权：请输入【这台 Mac 的开机/登录密码】"
+  echo "   （就是你每天开机、解锁这台电脑用的那个密码；不是 vault 密码）"
+  echo "   输入时屏幕不显示任何字符，这是正常的，输完按回车即可。"
+  echo "----------------------------------------------------"
   if ! sudo -v; then
     echo ""
-    echo "sudo 授权失败，无法继续安装 Homebrew。"
+    echo "sudo 授权失败，无法继续安装 Homebrew。请确认输入的是本机开机密码。"
     exit 1
   fi
 }
@@ -129,10 +134,16 @@ download_and_decrypt_vault() {
   fi
 
   echo ""
-  echo "请输入装机 vault 密码（不会显示）："
+  echo "----------------------------------------------------"
+  echo "🔐 需要输入：【vault 装机密码】（不是这台电脑的开机密码！）"
+  echo "   这是你之前专门为装机设定的那个密码，用来解开加密的密钥包。"
+  echo "   下面会出现一行英文 “Enter passphrase:”，那就是让你输这个密码。"
+  echo "   输入时屏幕不显示任何字符，这是正常的，输完按回车。"
+  echo "----------------------------------------------------"
   if ! age -d "$vault_file" > "$env_file"; then
     echo ""
-    echo "vault 解密失败：密码错误，或 vault 文件损坏。"
+    echo "vault 解密失败：密码不对，或 vault 文件损坏。"
+    echo "提示：这里要输的是【vault 装机密码】，不是电脑开机密码。可重新运行本命令再试。"
     exit 1
   fi
 
@@ -175,18 +186,27 @@ run_chezmoi() {
   local repo="https://github.com/${DOTFILES_SLUG}.git"
   log "拉取并应用私有 dotfiles：$repo"
   echo ""
-  echo "接下来会出现 chezmoi 选择题："
-  echo "  1) 机器角色 1/2/3"
-  echo "  2) Git 用户名/邮箱"
-  echo "  3) 是否同步 starship"
-  echo "  4) 是否同步 SSH 配置（如果 vault 已恢复 age 私钥，可选 y）"
+  echo "接下来会出现几个中文选择题（很快，只问一次并记住）："
+  echo "  1) 机器角色：输数字 1=移动机Air / 2=Mac Mini工作站 / 3=公司主力Pro"
+  echo "  2) Git 用户名/邮箱：可直接按回车跳过（不影响装机）"
+  echo "  3) 是否同步 starship 终端样式：一般选 y"
+  echo "  4) 是否同步 SSH 配置：vault 已恢复密钥，可选 y"
   echo ""
   chezmoi init --apply --guess-repo-url=false "$repo"
 }
 
 main() {
   echo "===================================================="
-  echo "Mac 一行装机 · vault 版"
+  echo "🚀 Mac 一行装机 · vault 版"
+  echo "===================================================="
+  echo "全程你只需要做这几件事（其余全自动）："
+  echo "  1. 若弹出 CLT 安装窗口 → 点【安装】"
+  echo "  2. 输入一次【这台电脑的开机密码】（装 Homebrew 用）"
+  echo "  3. 输入一次【vault 装机密码】（解密密钥包用，和开机密码不同）"
+  echo "  4. 回答几个中文选择题（机器角色等）"
+  echo ""
+  echo "💡 本脚本可反复运行：已完成的步骤会自动跳过，"
+  echo "   万一中途失败或卡住，直接重新粘贴同一行命令即可续跑，不会重来。"
   echo "===================================================="
   preflight_admin
   ensure_clt
