@@ -224,12 +224,14 @@ ensure_software() {
   if [ -d "$src/.git" ] && [ ! -L "$src" ]; then
     if [ -z "$(git -C "$src" status --porcelain 2>/dev/null)" ]; then
       log "更新本机 dotfiles 到最新版本..."
-      if git -C "$src" fetch origin main >/dev/null 2>&1; then
+      # GIT_TERMINAL_PROMPT=0：绝不弹用户名/密码交互，拉不到就静默跳过、用本机版继续，
+      # 避免卡在 "Username for 'https://github.com':"。凭证已在 keychain，正常能静默拉取。
+      if GIT_TERMINAL_PROMPT=0 git -C "$src" fetch origin main >/dev/null 2>&1; then
         git -C "$src" reset --hard origin/main >/dev/null 2>&1 \
           && ok "已更新到最新脚本。" \
           || warn "无法重置到最新，将用本机现有版本继续。"
       else
-        warn "无法连接 GitHub 更新脚本，将用本机现有版本继续。"
+        warn "无法自动更新脚本（不影响装机），将用本机现有版本继续。"
       fi
     else
       warn "本机 dotfiles 有未提交改动，跳过自动更新（避免覆盖你的修改）。"
