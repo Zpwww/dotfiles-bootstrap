@@ -41,11 +41,29 @@ ensure_clt() {
   log "CLT 安装完成。"
 }
 
+ensure_sudo() {
+  log "检测管理员权限（安装 Homebrew 需要 sudo）。"
+  if ! id -Gn | tr ' ' '\n' | grep -qx "admin"; then
+    echo ""
+    echo "当前用户不是管理员，无法安装 Homebrew。"
+    echo "请先到：系统设置 → 用户与群组，把当前用户改为管理员；或换管理员账号登录后重试。"
+    exit 1
+  fi
+
+  echo "接下来 macOS 可能会要求输入一次本机开机密码，用于授权安装 Homebrew。"
+  if ! sudo -v; then
+    echo ""
+    echo "sudo 授权失败，无法继续安装 Homebrew。"
+    exit 1
+  fi
+}
+
 ensure_brew() {
   log "检测 Homebrew..."
   if ! command -v brew >/dev/null 2>&1; then
-    log "通过中科大镜像安装 Homebrew，可能需要输入开机密码。"
-    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://mirrors.ustc.edu.cn/misc/brew-install.sh)"
+    ensure_sudo
+    log "通过中科大镜像安装 Homebrew。"
+    /bin/bash -c "$(curl -fsSL https://mirrors.ustc.edu.cn/misc/brew-install.sh)"
   fi
   if [[ "$(uname -m)" == "arm64" ]]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
