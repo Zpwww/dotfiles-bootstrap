@@ -23,7 +23,21 @@ TMP_DIR="$(mktemp -d)"
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
-log() { echo "[$(date +%H:%M:%S)] $*"; }
+# ---- 终端配色（bash 3.2 兼容；非 TTY 或不支持时自动降级为无色）----
+if [ -t 1 ] && command -v tput >/dev/null 2>&1 && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
+  C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'
+  C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'
+  C_BLUE=$'\033[34m'; C_CYAN=$'\033[36m'; C_RESET=$'\033[0m'
+else
+  C_BOLD=''; C_DIM=''; C_RED=''; C_GREEN=''; C_YELLOW=''; C_BLUE=''; C_CYAN=''; C_RESET=''
+fi
+
+log()  { echo "${C_DIM}[$(date +%H:%M:%S)]${C_RESET} $*"; }
+ok()   { echo "${C_GREEN}✅ $*${C_RESET}"; }
+warn() { echo "${C_YELLOW}⚠️  $*${C_RESET}"; }
+err()  { echo "${C_RED}❌ $*${C_RESET}"; }
+hr()   { echo "${C_CYAN}────────────────────────────────────────────────────${C_RESET}"; }
+title(){ echo "${C_BOLD}${C_CYAN}$*${C_RESET}"; }
 
 preflight_admin() {
   # 最优先检查：安装 Homebrew / App / 改系统设置都需要管理员。
@@ -59,29 +73,29 @@ preflight_admin() {
 ensure_clt() {
   log "检测 Xcode Command Line Tools..."
   if xcode-select -p >/dev/null 2>&1; then
-    log "CLT 已就绪。"
+    ok "CLT 已就绪。"
     return
   fi
-  log "触发 CLT 安装窗口（这是苹果弹的系统窗口）：请点【安装】，等它下载完成（约几分钟）。"
+  echo "${C_YELLOW}📦 即将弹出苹果的 CLT 安装窗口 → 请点【安装】，等它下载完成（约几分钟）。${C_RESET}"
   xcode-select --install 2>/dev/null || true
   until xcode-select -p >/dev/null 2>&1; do
-    printf "\r\033[K⏳ 正在等待 CLT 安装完成（在弹窗里点了【安装】后耐心等）..."
+    printf "\r\033[K${C_DIM}⏳ 正在等待 CLT 安装完成（在弹窗里点了【安装】后耐心等）...${C_RESET}"
     sleep 5
   done
   printf "\r\033[K"
-  log "CLT 安装完成。"
+  ok "CLT 安装完成。"
 }
 
 ensure_sudo() {
   echo ""
-  echo "----------------------------------------------------"
-  echo "🔑 需要授权：请输入【这台 Mac 的开机/登录密码】"
-  echo "   （就是你每天开机、解锁这台电脑用的那个密码；不是 vault 密码）"
-  echo "   输入时屏幕不显示任何字符，这是正常的，输完按回车即可。"
-  echo "----------------------------------------------------"
+  hr
+  echo "${C_YELLOW}${C_BOLD}🔑 需要授权：请输入【这台 Mac 的开机/登录密码】${C_RESET}"
+  echo "${C_DIM}   （就是你每天开机、解锁这台电脑用的那个密码；不是 vault 密码）"
+  echo "   输入时屏幕不显示任何字符，这是正常的，输完按回车即可。${C_RESET}"
+  hr
   if ! sudo -v; then
     echo ""
-    echo "sudo 授权失败，无法继续安装 Homebrew。请确认输入的是本机开机密码。"
+    err "sudo 授权失败，无法继续安装 Homebrew。请确认输入的是本机开机密码。"
     exit 1
   fi
 }
@@ -98,14 +112,14 @@ ensure_brew() {
   else
     eval "$(/usr/local/bin/brew shellenv)"
   fi
-  log "Homebrew 已就绪。"
+  ok "Homebrew 已就绪。"
 }
 
 ensure_tools() {
   log "安装/确认 age、git、chezmoi、gh..."
   for pkg in age git chezmoi gh; do
     if brew list "$pkg" >/dev/null 2>&1; then
-      log "$pkg 已安装。"
+      ok "$pkg 已安装。"
     else
       brew install "$pkg"
     fi
@@ -134,16 +148,16 @@ download_and_decrypt_vault() {
   fi
 
   echo ""
-  echo "----------------------------------------------------"
-  echo "🔐 需要输入：【vault 装机密码】（不是这台电脑的开机密码！）"
-  echo "   这是你之前专门为装机设定的那个密码，用来解开加密的密钥包。"
+  hr
+  echo "${C_YELLOW}${C_BOLD}🔐 需要输入：【vault 装机密码】（不是这台电脑的开机密码！）${C_RESET}"
+  echo "${C_DIM}   这是你之前专门为装机设定的那个密码，用来解开加密的密钥包。"
   echo "   下面会出现一行英文 “Enter passphrase:”，那就是让你输这个密码。"
-  echo "   输入时屏幕不显示任何字符，这是正常的，输完按回车。"
-  echo "----------------------------------------------------"
+  echo "   输入时屏幕不显示任何字符，这是正常的，输完按回车。${C_RESET}"
+  hr
   if ! age -d "$vault_file" > "$env_file"; then
     echo ""
-    echo "vault 解密失败：密码不对，或 vault 文件损坏。"
-    echo "提示：这里要输的是【vault 装机密码】，不是电脑开机密码。可重新运行本命令再试。"
+    err "vault 解密失败：密码不对，或 vault 文件损坏。"
+    echo "${C_DIM}   提示：这里要输的是【vault 装机密码】，不是电脑开机密码。可重新运行本命令再试。${C_RESET}"
     exit 1
   fi
 
@@ -152,7 +166,7 @@ download_and_decrypt_vault() {
   source "$env_file"
   set +a
 
-  log "vault 已解密。"
+  ok "vault 已解密。"
 }
 
 install_age_identity() {
@@ -160,9 +174,9 @@ install_age_identity() {
     mkdir -p "$HOME/.config/chezmoi"
     printf "%s" "$AGE_IDENTITY_B64" | decode_b64 > "$HOME/.config/chezmoi/key.txt"
     chmod 600 "$HOME/.config/chezmoi/key.txt"
-    log "已恢复 age 私钥到 ~/.config/chezmoi/key.txt。"
+    ok "已恢复 age 私钥到 ~/.config/chezmoi/key.txt。"
   else
-    log "vault 中未包含 AGE_IDENTITY_B64，将跳过 SSH 配置解密。"
+    warn "vault 中未包含 AGE_IDENTITY_B64，将跳过 SSH 配置解密。"
   fi
 }
 
@@ -179,35 +193,37 @@ install_github_token() {
   git config --global credential.helper osxkeychain
   printf "protocol=https\nhost=github.com\nusername=%s\npassword=%s\n\n" "$GITHUB_USERNAME" "$GITHUB_TOKEN" | git credential approve
   unset GITHUB_TOKEN
-  log "GitHub 凭证已写入 macOS 钥匙串。"
+  ok "GitHub 凭证已写入 macOS 钥匙串。"
 }
 
 run_chezmoi() {
   local repo="https://github.com/${DOTFILES_SLUG}.git"
   log "拉取并应用私有 dotfiles：$repo"
   echo ""
-  echo "接下来会出现几个中文选择题（很快，只问一次并记住）："
-  echo "  1) 机器角色：输数字 1=移动机Air / 2=Mac Mini工作站 / 3=公司主力Pro"
-  echo "  2) Git 用户名/邮箱：可直接按回车跳过（不影响装机）"
-  echo "  3) 是否同步 starship 终端样式：一般选 y"
-  echo "  4) 是否同步 SSH 配置：vault 已恢复密钥，可选 y"
+  title "📝 接下来会出现几个中文选择题（很快，只问一次并记住）："
+  echo "  ${C_BOLD}1)${C_RESET} 机器角色：输数字 ${C_BOLD}1${C_RESET}=移动机Air / ${C_BOLD}2${C_RESET}=Mac Mini工作站 / ${C_BOLD}3${C_RESET}=公司主力Pro"
+  echo "  ${C_BOLD}2)${C_RESET} Git 用户名/邮箱：可直接按回车跳过（不影响装机）"
+  echo "  ${C_BOLD}3)${C_RESET} 是否同步 starship 终端样式：一般选 ${C_BOLD}y${C_RESET}"
+  echo "  ${C_BOLD}4)${C_RESET} 是否同步 SSH 配置：vault 已恢复密钥，可选 ${C_BOLD}y${C_RESET}"
+  echo "${C_DIM}   （若提示某文件已被改动，会自动用仓库版本覆盖，无需你选择）${C_RESET}"
   echo ""
-  chezmoi init --apply --guess-repo-url=false "$repo"
+  # 冲突时自动用仓库版覆盖，不打断用户（个人手动改过 gitconfig 等会触发）
+  chezmoi init --apply --guess-repo-url=false --force "$repo"
 }
 
 main() {
-  echo "===================================================="
-  echo "🚀 Mac 一行装机 · vault 版"
-  echo "===================================================="
-  echo "全程你只需要做这几件事（其余全自动）："
-  echo "  1. 若弹出 CLT 安装窗口 → 点【安装】"
-  echo "  2. 输入一次【这台电脑的开机密码】（装 Homebrew 用）"
-  echo "  3. 输入一次【vault 装机密码】（解密密钥包用，和开机密码不同）"
-  echo "  4. 回答几个中文选择题（机器角色等）"
+  hr
+  title "🚀 Mac 一行装机 · vault 版"
+  hr
+  echo "全程你只需做这几件事（其余全自动）："
+  echo "  ${C_BOLD}1.${C_RESET} 若弹出 CLT 安装窗口 → 点${C_BOLD}【安装】${C_RESET}"
+  echo "  ${C_BOLD}2.${C_RESET} 输入一次 ${C_YELLOW}【这台电脑的开机密码】${C_RESET}（装 Homebrew 用）"
+  echo "  ${C_BOLD}3.${C_RESET} 输入一次 ${C_YELLOW}【vault 装机密码】${C_RESET}（解密密钥包，${C_BOLD}和开机密码不同${C_RESET}）"
+  echo "  ${C_BOLD}4.${C_RESET} 回答几个中文选择题（机器角色等）"
   echo ""
-  echo "💡 本脚本可反复运行：已完成的步骤会自动跳过，"
-  echo "   万一中途失败或卡住，直接重新粘贴同一行命令即可续跑，不会重来。"
-  echo "===================================================="
+  echo "${C_DIM}💡 本脚本可反复运行：已完成的步骤会自动跳过；"
+  echo "   万一中途失败或卡住，直接重新粘贴同一行命令即可续跑，不会重来。${C_RESET}"
+  hr
   preflight_admin
   ensure_clt
   ensure_brew
@@ -217,9 +233,10 @@ main() {
   install_github_token
   run_chezmoi
   echo ""
-  echo "===================================================="
-  echo "完成。若这是个人设备，记得只安装你需要的公司管控/内网工具。"
-  echo "===================================================="
+  hr
+  title "🎉 装机流程完成！"
+  echo "${C_DIM}若这是个人设备，记得只安装你需要的公司管控/内网工具。${C_RESET}"
+  hr
 }
 
 main "$@"
