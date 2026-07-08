@@ -211,6 +211,29 @@ run_chezmoi() {
   chezmoi init --apply --guess-repo-url=false --force "$repo"
 }
 
+ensure_software() {
+  # 关键：chezmoi 的 run_once 脚本(装软件的 90)只按内容跑一次——
+  # 若首次装机中途卡住/中断，重跑 bootstrap 时 chezmoi 会认为"已跑过"而跳过，
+  # 导致软件没装全却显示完成。这里由 bootstrap 主动再跑一次装软件脚本，
+  # 它本身幂等(已装的自动跳过)+ 带 GitHub 加速，保证每次重跑都能把软件补齐。
+  local src="${HOME}/.local/share/chezmoi"
+  local sw="${src}/run_once_after_90_install_brew_bundle.sh"
+  if [ ! -f "$HOME/.Brewfile" ]; then
+    warn "未找到 ~/.Brewfile（软件向导可能未生成清单），跳过补装。可重跑 'chezmoi apply' 触发向导。"
+    return
+  fi
+  if [ ! -f "$sw" ]; then
+    warn "未找到装软件脚本，跳过补装。"
+    return
+  fi
+  echo ""
+  hr
+  title "📦 确保软件已装齐（幂等：已装的会自动跳过，未装的补上）"
+  hr
+  # 90 脚本内部已做失败汇总，不会因单个失败中断；用 || true 防止 set -e 提前退出
+  bash "$sw" || warn "部分软件未装成功（见上方汇总），可再次重跑本命令补齐。"
+}
+
 main() {
   hr
   title "🚀 Mac 一行装机 · vault 版"
@@ -232,10 +255,12 @@ main() {
   install_age_identity
   install_github_token
   run_chezmoi
+  ensure_software
   echo ""
   hr
   title "🎉 装机流程完成！"
   echo "${C_DIM}若这是个人设备，记得只安装你需要的公司管控/内网工具。${C_RESET}"
+  echo "${C_DIM}如仍有个别软件未装成功，直接重跑本命令即可继续补齐（已装的会跳过）。${C_RESET}"
   hr
 }
 
