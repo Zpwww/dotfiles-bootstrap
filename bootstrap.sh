@@ -25,6 +25,37 @@ trap cleanup EXIT
 
 log() { echo "[$(date +%H:%M:%S)] $*"; }
 
+preflight_admin() {
+  # 最优先检查：安装 Homebrew / App / 改系统设置都需要管理员。
+  # 普通用户没有 sudo 权限，脚本再聪明也装不了 Homebrew，所以第一步就拦住，
+  # 绝不让用户白等 CLT 安装几分钟后才在中途失败。
+  if id -Gn "$(whoami)" | tr ' ' '\n' | grep -qx "admin"; then
+    return
+  fi
+  local me; me="$(whoami)"
+  echo ""
+  echo "===================================================="
+  echo "⛔ 装机前置检查：当前用户「$me」不是管理员，无法继续"
+  echo "===================================================="
+  echo "安装 Homebrew / 应用 / 系统设置都需要管理员权限，这是 macOS 的硬性要求。"
+  echo "请用下面任一方式授权后，回来重新运行同一行命令即可（会跳过已完成步骤）："
+  echo ""
+  echo "【方式 A · 图形界面，推荐】"
+  echo "  1. 系统设置 → 用户与群组"
+  echo "  2. 点「$me」旁边的 ⓘ"
+  echo "  3. 打开「允许此用户管理这台电脑」"
+  echo "  4. 注销并重新登录（让权限生效）"
+  echo ""
+  echo "【方式 B · 一条命令】"
+  echo "  用另一个「管理员账号」登录（或在其终端里）执行："
+  echo "      sudo dseditgroup -o edit -a $me -t user admin"
+  echo "  然后回到「$me」账号，重新运行本装机命令。"
+  echo ""
+  echo "授权完成后，重新粘贴运行那一行命令即可。"
+  echo "===================================================="
+  exit 1
+}
+
 ensure_clt() {
   log "检测 Xcode Command Line Tools..."
   if xcode-select -p >/dev/null 2>&1; then
@@ -42,15 +73,7 @@ ensure_clt() {
 }
 
 ensure_sudo() {
-  log "检测管理员权限（安装 Homebrew 需要 sudo）。"
-  if ! id -Gn | tr ' ' '\n' | grep -qx "admin"; then
-    echo ""
-    echo "当前用户不是管理员，无法安装 Homebrew。"
-    echo "请先到：系统设置 → 用户与群组，把当前用户改为管理员；或换管理员账号登录后重试。"
-    exit 1
-  fi
-
-  echo "接下来 macOS 可能会要求输入一次本机开机密码，用于授权安装 Homebrew。"
+  echo "接下来 macOS 会要求输入一次本机开机密码，用于授权安装 Homebrew。"
   if ! sudo -v; then
     echo ""
     echo "sudo 授权失败，无法继续安装 Homebrew。"
@@ -165,6 +188,7 @@ main() {
   echo "===================================================="
   echo "Mac 一行装机 · vault 版"
   echo "===================================================="
+  preflight_admin
   ensure_clt
   ensure_brew
   ensure_tools
