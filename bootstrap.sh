@@ -214,9 +214,28 @@ run_chezmoi() {
 ensure_software() {
   # 关键：chezmoi 的 run_once 脚本(装软件的 90)只按内容跑一次——
   # 若首次装机中途卡住/中断，重跑 bootstrap 时 chezmoi 会认为"已跑过"而跳过，
-  # 导致软件没装全却显示完成。这里由 bootstrap 主动再跑一次装软件脚本，
-  # 它本身幂等(已装的自动跳过)+ 带 GitHub 加速，保证每次重跑都能把软件补齐。
+  # 导致软件没装全却显示完成。这里由 bootstrap 主动再跑一次装软件脚本。
   local src="${HOME}/.local/share/chezmoi"
+
+  # 先把本机 dotfiles source 强制更新到 GitHub 最新，
+  # 避免跑到本机残留的旧版装软件脚本（旧版无进度、无 GitHub 加速）。
+  # 安全保护：source 是软链（如开发机指向云盘工作仓）或有未提交改动时不动它，
+  # 只对"纯 clone 的新机 source"做强制同步。
+  if [ -d "$src/.git" ] && [ ! -L "$src" ]; then
+    if [ -z "$(git -C "$src" status --porcelain 2>/dev/null)" ]; then
+      log "更新本机 dotfiles 到最新版本..."
+      if git -C "$src" fetch origin main >/dev/null 2>&1; then
+        git -C "$src" reset --hard origin/main >/dev/null 2>&1 \
+          && ok "已更新到最新脚本。" \
+          || warn "无法重置到最新，将用本机现有版本继续。"
+      else
+        warn "无法连接 GitHub 更新脚本，将用本机现有版本继续。"
+      fi
+    else
+      warn "本机 dotfiles 有未提交改动，跳过自动更新（避免覆盖你的修改）。"
+    fi
+  fi
+
   local sw="${src}/run_once_after_90_install_brew_bundle.sh"
   if [ ! -f "$HOME/.Brewfile" ]; then
     warn "未找到 ~/.Brewfile（软件向导可能未生成清单），跳过补装。可重跑 'chezmoi apply' 触发向导。"
