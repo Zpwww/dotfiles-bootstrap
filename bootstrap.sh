@@ -192,7 +192,8 @@ install_github_token() {
 
   git config --global credential.helper osxkeychain
   printf "protocol=https\nhost=github.com\nusername=%s\npassword=%s\n\n" "$GITHUB_USERNAME" "$GITHUB_TOKEN" | git credential approve
-  unset GITHUB_TOKEN
+  # 不 unset：ensure_software 里可能还要用 token 从 raw 直下私有仓文件(fallback)。
+  # bootstrap 结束进程退出后环境变量自然消失，不落盘、无残留。
   ok "GitHub 凭证已写入 macOS 钥匙串。"
 }
 
@@ -224,8 +225,8 @@ ensure_software() {
   if [ -d "$src/.git" ] && [ ! -L "$src" ]; then
     if [ -z "$(git -C "$src" status --porcelain 2>/dev/null)" ]; then
       log "更新本机 dotfiles 到最新版本..."
-      # 加速站候选：先本机加速前缀，最后裸连 GitHub 兜底。
-      # 国内直连 github.com 常年不稳，若只走 origin 会 fallback 到旧版脚本，
+      # 策略 A：整仓 git fetch（多加速站兜底）——最完整，但 git 端点常被墙。
+      # 国内直连 github.com 常年不稳,若只走 origin 会 fallback 到旧版脚本,
       # 导致 90(装软件) 走的还是"无进度无超时"的老代码 → 用户看到卡死。
       local base_url="https://github.com/${DOTFILES_SLUG}.git"
       local orig_remote; orig_remote="$(git -C "$src" remote get-url origin 2>/dev/null || echo "$base_url")"
@@ -256,7 +257,38 @@ ensure_software() {
           && ok "已更新到最新脚本。" \
           || warn "无法重置到最新，将用本机现有版本继续。"
       else
-        warn "所有加速站均无法更新脚本（网络问题？），将用本机现有版本继续。"
+        # 策略 B（降级）：git 端点全挂，但 bootstrap.sh 自己是从 raw 拉下来的
+        # → 说明 raw.githubusercontent.com 通。直接从 raw 下载 90 脚本覆盖本地文件，
+        # 只更新装软件脚本这一个关键文件，绕开 git 协议端点被墙的问题。
+        # 私有仓 raw 需要 Bearer token；从当前进程环境变量取(vault 解密后未被 unset)。
+        warn "git fetch 全部失败，改用 raw 直下核心脚本..."
+        local curl_auth=()
+        if [ -n "${GITHUB_TOKEN:-}" ]; then
+          curl_auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
+        fi
+        local raw_bases=(
+          "https://gh-proxy.com/https://raw.githubusercontent.com/${DOTFILES_SLUG}/main"
+          "https://raw.gitmirror.com/${DOTFILES_SLUG}/main"
+          "https://raw.githubusercontent.com/${DOTFILES_SLUG}/main"
+        )
+        # 只补下最关键的 90 脚本(装软件)。其他脚本要么早就跑过、要么本机版够用。
+        local target_file="run_once_after_90_install_brew_bundle.sh"
+        local raw_ok=""
+        for raw_base in "${raw_bases[@]}"; do
+          local raw_url="${raw_base}/${target_file}"
+          log "raw 下载尝试: ${raw_base%%/https:*}"
+          if curl -fsSL --max-time 30 "${curl_auth[@]}" "$raw_url" -o "${src}/${target_file}.new" 2>/dev/null \
+             && [ -s "${src}/${target_file}.new" ] \
+             && head -1 "${src}/${target_file}.new" | grep -q '^#!'; then
+            mv "${src}/${target_file}.new" "${src}/${target_file}"
+            chmod +x "${src}/${target_file}"
+            ok "已直接更新 ${target_file} 到最新版。"
+            raw_ok=1
+            break
+          fi
+          rm -f "${src}/${target_file}.new" 2>/dev/null
+        done
+        [ -z "$raw_ok" ] && warn "raw 也全挂了。请检查网络后重跑；本次将用本机现有脚本继续。"
       fi
     else
       warn "本机 dotfiles 有未提交改动，跳过自动更新（避免覆盖你的修改）。"
