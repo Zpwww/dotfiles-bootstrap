@@ -224,14 +224,39 @@ ensure_software() {
   if [ -d "$src/.git" ] && [ ! -L "$src" ]; then
     if [ -z "$(git -C "$src" status --porcelain 2>/dev/null)" ]; then
       log "更新本机 dotfiles 到最新版本..."
-      # GIT_TERMINAL_PROMPT=0：绝不弹用户名/密码交互，拉不到就静默跳过、用本机版继续，
-      # 避免卡在 "Username for 'https://github.com':"。凭证已在 keychain，正常能静默拉取。
-      if GIT_TERMINAL_PROMPT=0 git -C "$src" fetch origin main >/dev/null 2>&1; then
-        git -C "$src" reset --hard origin/main >/dev/null 2>&1 \
+      # 加速站候选：先本机加速前缀，最后裸连 GitHub 兜底。
+      # 国内直连 github.com 常年不稳，若只走 origin 会 fallback 到旧版脚本，
+      # 导致 90(装软件) 走的还是"无进度无超时"的老代码 → 用户看到卡死。
+      local base_url="https://github.com/${DOTFILES_SLUG}.git"
+      local orig_remote; orig_remote="$(git -C "$src" remote get-url origin 2>/dev/null || echo "$base_url")"
+      # GIT_TERMINAL_PROMPT=0：绝不弹用户名/密码交互，避免卡在凭证输入。
+      local fetched=""
+      for accel_prefix in "" "https://gh-proxy.com/" "https://ghproxy.net/" "https://github.akams.cn/"; do
+        local try_url="${accel_prefix}${base_url}"
+        # 裸连时用 origin 原 URL(可能已带凭证)，加速时临时切
+        if [ -n "$accel_prefix" ]; then
+          git -C "$src" remote set-url origin "$try_url" 2>/dev/null || continue
+          log "尝试通过加速站更新: ${accel_prefix%/}"
+        else
+          log "尝试直连 GitHub 更新..."
+        fi
+        if GIT_TERMINAL_PROMPT=0 git -C "$src" \
+             -c http.lowSpeedLimit=1000 \
+             -c http.lowSpeedTime=15 \
+             fetch origin main >/dev/null 2>&1; then
+          fetched=1
+          break
+        fi
+      done
+      # 无论成败,把 origin 还原为原始 URL(避免污染)
+      git -C "$src" remote set-url origin "$orig_remote" 2>/dev/null || true
+
+      if [ -n "$fetched" ]; then
+        git -C "$src" reset --hard FETCH_HEAD >/dev/null 2>&1 \
           && ok "已更新到最新脚本。" \
           || warn "无法重置到最新，将用本机现有版本继续。"
       else
-        warn "无法自动更新脚本（不影响装机），将用本机现有版本继续。"
+        warn "所有加速站均无法更新脚本（网络问题？），将用本机现有版本继续。"
       fi
     else
       warn "本机 dotfiles 有未提交改动，跳过自动更新（避免覆盖你的修改）。"
