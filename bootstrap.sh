@@ -39,9 +39,9 @@ err()  { echo "${C_RED}❌ $*${C_RESET}"; }
 hr()   { echo "${C_CYAN}────────────────────────────────────────────────────${C_RESET}"; }
 title(){ echo "${C_BOLD}${C_CYAN}$*${C_RESET}"; }
 
-# ---- 全局幕头（金字塔式：5 幕剧统一编号，用户永远知道走到哪了）----
+# ---- 全局 6 幕编号（用户永远知道走到哪了）----
 # 用法：act 1 "浇筑地基"
-TOTAL_ACTS=5
+TOTAL_ACTS=6
 act() {
   local n="$1"; shift
   echo ""
@@ -102,19 +102,25 @@ ensure_sudo() {
   hr
   echo "${C_YELLOW}${C_BOLD}🔑 需要授权：请输入【这台 Mac 的开机/登录密码】${C_RESET}"
   echo "${C_DIM}   （就是你每天开机、解锁这台电脑用的那个密码；不是 vault 密码）"
-  echo "   输入时屏幕不显示任何字符，这是正常的，输完按回车即可。${C_RESET}"
+  echo "   输入时屏幕不显示任何字符，这是正常的，输完按回车即可。"
+  echo "   本次只问这一次，接下来的所有系统操作都由此授权覆盖。${C_RESET}"
   hr
   if ! sudo -v; then
     echo ""
     err "sudo 授权失败，无法继续安装 Homebrew。请确认输入的是本机开机密码。"
     exit 1
   fi
+  # 后台保活：只要主进程活着，就每 60 秒续期一次 sudo 时间戳。
+  # 这样后续所有子脚本（10 / 20 / 90 / 95）里的 sudo 都能静默通过 sudo -n。
+  # 主进程退出后 kill -0 失败，自动结束。
+  ( while true; do sudo -n true 2>/dev/null; sleep 50; kill -0 "$$" 2>/dev/null || exit; done ) &
+  SUDO_KEEPALIVE_PID=$!
+  ok "已获取管理员授权，全程只需这一次。"
 }
 
 ensure_brew() {
   log "检测 Homebrew..."
   if ! command -v brew >/dev/null 2>&1; then
-    ensure_sudo
     log "通过中科大镜像安装 Homebrew。"
     /bin/bash -c "$(curl -fsSL https://mirrors.ustc.edu.cn/misc/brew-install.sh)"
   fi
@@ -408,22 +414,30 @@ ensure_software() {
 
 main() {
   hr
-  title "🚀 Mac 一行装机 · vault 版 · 全流程 5 幕剧"
+  title "🚀 Mac 一行装机 · vault 版 · 6 幕全流程"
   hr
-  echo "接下来会分 5 幕自动执行，全程你只需 ${C_BOLD}3 次输入${C_RESET}："
-  echo "  幕 1 · 浇筑地基       — 装 CLT / Homebrew（可能弹一次 CLT 安装窗口）"
-  echo "  幕 2 · 解密身份       — 需要输入 ${C_YELLOW}【vault 装机密码】${C_RESET}"
-  echo "  幕 3 · 拉取仓库&选择题 — 需要输入 ${C_YELLOW}【开机密码】${C_RESET} + 回答机器角色等"
-  echo "  幕 4 · 注入系统设置   — 自动（触控板、听写、电源策略等）"
-  echo "  幕 5 · 批量装软件     — 自动，约 ${C_BOLD}30-60 分钟${C_RESET}（40+ 软件、含 Office/微信大包）"
+  echo "全流程分 6 幕自动执行，${C_BOLD}你只需 2 次输入 + 1 组选择题${C_RESET}："
+  echo "  幕 1 · 装地基         — 装 CLT / Homebrew / 核心工具"
+  echo "                          需要输入 ${C_YELLOW}【开机密码】${C_RESET} × 1（全程只问这一次）"
+  echo "  幕 2 · 解密身份       — 解密 vault，恢复 age 私钥 + GitHub 凭证"
+  echo "                          需要输入 ${C_YELLOW}【vault 装机密码】${C_RESET} × 1"
+  echo "  幕 3 · 5 题选项       — 机器角色/Git 身份/starship/SSH 同步"
+  echo "                          shell 交互，答完立刻回显 ✔"
+  echo "  幕 4 · 系统设置       — 触控板/听写/电源策略（按角色分化）"
+  echo "  幕 5 · 生成软件清单   — 按角色推荐清单（默认 headless；WIZARD=1 弹浏览器）"
+  echo "  幕 6 · 批量装软件     — 40+ 软件，${C_BOLD}约 30-60 分钟${C_RESET}，逐条进度+心跳+超时"
   echo ""
-  echo "${C_DIM}💡 本脚本${C_BOLD}完全幂等${C_RESET}${C_DIM}：中途卡住/失败随时 Ctrl+C，重贴一行命令自动续跑，${C_RESET}"
-  echo "${C_DIM}   已完成的步骤会秒判跳过，绝不重复浪费时间。${C_RESET}"
+  echo "${C_DIM}💡 装机进行时的使用指南（收藏本条）：${C_RESET}"
+  echo "${C_DIM}   ✔ 现在可以：切窗口做别的、让电脑合盖休眠（brew 会自动暂停恢复）${C_RESET}"
+  echo "${C_DIM}   ✘ 现在不要：断网 / 关机 / 强制重启${C_RESET}"
+  echo "${C_DIM}   💾 想中断：Ctrl+C 随时安全退出，重贴同一行命令自动续跑（已完成步骤秒过）${C_RESET}"
+  echo "${C_DIM}   📄 全程日志：~/.local/state/dotfiles-install-logs/brew_bundle_*.log${C_RESET}"
   hr
   preflight_admin
 
-  # ─── 幕 1：浇筑地基 ─────────────────────────────────────────
-  act 1 "浇筑地基（CLT + Homebrew + 核心工具）"
+  # ─── 幕 1：装地基（先拿一次 sudo，全程 keepalive）──────────────
+  act 1 "装地基（CLT + Homebrew + 核心工具）"
+  ensure_sudo             # 全程唯一一次开机密码，keepalive 到进程退出
   ensure_clt
   ensure_brew
   ensure_tools
@@ -434,29 +448,50 @@ main() {
   install_age_identity
   install_github_token
 
-  # ─── 幕 3：拉取仓库 + 选择题 ────────────────────────────────
-  # 注：chezmoi apply 会串行触发幕 4（10 脚本系统设置）与幕 5 前置（20 地基复检）。
-  # 由 bootstrap 打幕头 + 各脚本自己不再喊大标题（改用小节标题）。
-  act 3 "拉取 dotfiles 仓库 + 回答选择题"
+  # ─── 幕 3：5 题选择 + 拉取仓库 ──────────────────────────────
+  # 5 题由 shell 前置问答，答完注入 chezmoi。chezmoi apply 会串行触发:
+  #   幕 4 (10 脚本 系统设置) → 幕 5 (80 脚本 生成清单) → 幕 6 (90 脚本 装软件) → 95 收尾
+  # 每个子脚本自己不喊大标题，由 bootstrap 打幕头统一叙事。
+  act 3 "5 题选择 + 拉取 dotfiles 仓库"
   run_chezmoi
 
-  # ─── 幕 5：批量装软件 ────────────────────────────────────────
-  # 幕 4 已由 chezmoi apply 内触发（10 脚本）。这里由 bootstrap 主动跑 90
-  # 是为了处理"中途卡死重跑"场景（chezmoi 会认为 run_once 已跑过而跳过）。
-  act 5 "批量装软件（逐条进度+心跳+超时保护）"
+  # ─── 幕 6 兜底：主动重跑 90（处理 chezmoi run_once 跳过场景）──
+  act 6 "批量装软件（幂等续跑保险丝）"
+  echo "${C_DIM}提示：chezmoi 的 run_once 只按内容跑一次，中途卡死重跑时会跳过 90，${C_RESET}"
+  echo "${C_DIM}      所以这里由 bootstrap 主动再跑一次装软件脚本，确保软件真装齐。${C_RESET}"
   ensure_software
 
   echo ""
   hr
-  title "🎉 五幕演出完成！Mac 已从裸机变成你的顶级工作站。"
-  echo "${C_DIM}下一步：${C_RESET}"
-  echo "  ${C_BOLD}·${C_RESET} 重启一次电脑（触控板/听写等系统设置才完全生效）"
-  echo "  ${C_BOLD}·${C_RESET} 查看 ${C_BOLD}~/.Brewfile.manual.txt${C_RESET} 手动装剩下的（WorkBuddy 等司内软件）"
-  echo "  ${C_BOLD}·${C_RESET} 双击桌面「补装海外软件.command」补 Chrome/Claude/ChatGPT（需外网）"
-  echo "  ${C_BOLD}·${C_RESET} 系统设置 → 隐私与安全性 → 辅助功能：勾选 Raycast / Loop"
-  echo ""
-  echo "${C_DIM}如个别软件未装成功，直接重跑本命令即可继续补齐（已装的会跳过）。${C_RESET}"
+  title "🎉 六幕演出完成！Mac 已从裸机变成你的顶级工作站。"
   hr
+  echo "${C_BOLD}📋 装完你需要做的事（按优先级）：${C_RESET}"
+  echo ""
+  echo "  ${C_BOLD}① 重启一次电脑${C_RESET}"
+  echo "     触控板手势/听写关闭/电源策略等系统级设置需要重启才完全生效。"
+  echo ""
+  echo "  ${C_BOLD}② 授予辅助权限（重启后做）${C_RESET}"
+  echo "     系统设置 → 隐私与安全性 → 辅助功能 → 勾选 Raycast、Loop"
+  echo ""
+  echo "  ${C_BOLD}③ 手动装 brew 装不了的（司内软件）${C_RESET}"
+  echo "     查看清单：cat ~/.Brewfile.manual.txt"
+  echo "     常见项目：WorkBuddy → https://www.codebuddy.cn/work/"
+  echo "               WeTERM → 司内渠道"
+  echo ""
+  echo "  ${C_BOLD}④ 补装海外软件（Chrome / Claude / ChatGPT 等）${C_RESET}"
+  echo "     接通你自己的代理后，双击桌面「补装海外软件.command」一键补齐。"
+  echo ""
+  if [ -s "$HOME/.local/state/dotfiles-install-logs/last_failed.Brewfile" ]; then
+    echo "  ${C_YELLOW}⚠️ 本次有软件未装成功，请查看上方汇总，或直接一键重试：${C_RESET}"
+    echo "     HOMEBREW_ARTIFACT_DOMAIN=https://gh-proxy.com brew bundle \\"
+    echo "       --file=~/.local/state/dotfiles-install-logs/last_failed.Brewfile"
+    echo ""
+  fi
+  echo "${C_DIM}如个别软件仍需补齐，直接重跑本命令即可（已装的会秒判跳过）。${C_RESET}"
+  hr
+
+  # 收尾：结束 sudo keepalive
+  [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
 }
 
 main "$@"
