@@ -39,6 +39,17 @@ err()  { echo "${C_RED}❌ $*${C_RESET}"; }
 hr()   { echo "${C_CYAN}────────────────────────────────────────────────────${C_RESET}"; }
 title(){ echo "${C_BOLD}${C_CYAN}$*${C_RESET}"; }
 
+# ---- 全局幕头（金字塔式：5 幕剧统一编号，用户永远知道走到哪了）----
+# 用法：act 1 "浇筑地基"
+TOTAL_ACTS=5
+act() {
+  local n="$1"; shift
+  echo ""
+  echo "${C_BOLD}${C_BLUE}╔══════════════════════════════════════════════════╗${C_RESET}"
+  printf "${C_BOLD}${C_BLUE}║${C_RESET} ${C_BOLD}第 %s / %s 幕：%-32s${C_RESET} ${C_BOLD}${C_BLUE}║${C_RESET}\n" "$n" "$TOTAL_ACTS" "$*"
+  echo "${C_BOLD}${C_BLUE}╚══════════════════════════════════════════════════╝${C_RESET}"
+}
+
 preflight_admin() {
   # 最优先检查：安装 Homebrew / App / 改系统设置都需要管理员。
   # 普通用户没有 sudo 权限，脚本再聪明也装不了 Homebrew，所以第一步就拦住，
@@ -304,41 +315,60 @@ ensure_software() {
     warn "未找到装软件脚本，跳过补装。"
     return
   fi
-  echo ""
-  hr
-  title "📦 确保软件已装齐（幂等：已装的会自动跳过，未装的补上）"
-  hr
   # 90 脚本内部已做失败汇总，不会因单个失败中断；用 || true 防止 set -e 提前退出
   bash "$sw" || warn "部分软件未装成功（见上方汇总），可再次重跑本命令补齐。"
 }
 
 main() {
   hr
-  title "🚀 Mac 一行装机 · vault 版"
+  title "🚀 Mac 一行装机 · vault 版 · 全流程 5 幕剧"
   hr
-  echo "全程你只需做这几件事（其余全自动）："
-  echo "  ${C_BOLD}1.${C_RESET} 若弹出 CLT 安装窗口 → 点${C_BOLD}【安装】${C_RESET}"
-  echo "  ${C_BOLD}2.${C_RESET} 输入一次 ${C_YELLOW}【这台电脑的开机密码】${C_RESET}（装 Homebrew 用）"
-  echo "  ${C_BOLD}3.${C_RESET} 输入一次 ${C_YELLOW}【vault 装机密码】${C_RESET}（解密密钥包，${C_BOLD}和开机密码不同${C_RESET}）"
-  echo "  ${C_BOLD}4.${C_RESET} 回答几个中文选择题（机器角色等）"
+  echo "接下来会分 5 幕自动执行，全程你只需 ${C_BOLD}3 次输入${C_RESET}："
+  echo "  幕 1 · 浇筑地基       — 装 CLT / Homebrew（可能弹一次 CLT 安装窗口）"
+  echo "  幕 2 · 解密身份       — 需要输入 ${C_YELLOW}【vault 装机密码】${C_RESET}"
+  echo "  幕 3 · 拉取仓库&选择题 — 需要输入 ${C_YELLOW}【开机密码】${C_RESET} + 回答机器角色等"
+  echo "  幕 4 · 注入系统设置   — 自动（触控板、听写、电源策略等）"
+  echo "  幕 5 · 批量装软件     — 自动（约 15-30 分钟，逐条进度+心跳）"
   echo ""
-  echo "${C_DIM}💡 本脚本可反复运行：已完成的步骤会自动跳过；"
-  echo "   万一中途失败或卡住，直接重新粘贴同一行命令即可续跑，不会重来。${C_RESET}"
+  echo "${C_DIM}💡 本脚本${C_BOLD}完全幂等${C_RESET}${C_DIM}：中途卡住/失败随时 Ctrl+C，重贴一行命令自动续跑，${C_RESET}"
+  echo "${C_DIM}   已完成的步骤会秒判跳过，绝不重复浪费时间。${C_RESET}"
   hr
   preflight_admin
+
+  # ─── 幕 1：浇筑地基 ─────────────────────────────────────────
+  act 1 "浇筑地基（CLT + Homebrew + 核心工具）"
   ensure_clt
   ensure_brew
   ensure_tools
+
+  # ─── 幕 2：解密身份 ─────────────────────────────────────────
+  act 2 "解密身份（age 私钥 + GitHub 凭证）"
   download_and_decrypt_vault
   install_age_identity
   install_github_token
+
+  # ─── 幕 3：拉取仓库 + 选择题 ────────────────────────────────
+  # 注：chezmoi apply 会串行触发幕 4（10 脚本系统设置）与幕 5 前置（20 地基复检）。
+  # 由 bootstrap 打幕头 + 各脚本自己不再喊大标题（改用小节标题）。
+  act 3 "拉取 dotfiles 仓库 + 回答选择题"
   run_chezmoi
+
+  # ─── 幕 5：批量装软件 ────────────────────────────────────────
+  # 幕 4 已由 chezmoi apply 内触发（10 脚本）。这里由 bootstrap 主动跑 90
+  # 是为了处理"中途卡死重跑"场景（chezmoi 会认为 run_once 已跑过而跳过）。
+  act 5 "批量装软件（逐条进度+心跳+超时保护）"
   ensure_software
+
   echo ""
   hr
-  title "🎉 装机流程完成！"
-  echo "${C_DIM}若这是个人设备，记得只安装你需要的公司管控/内网工具。${C_RESET}"
-  echo "${C_DIM}如仍有个别软件未装成功，直接重跑本命令即可继续补齐（已装的会跳过）。${C_RESET}"
+  title "🎉 五幕演出完成！Mac 已从裸机变成你的顶级工作站。"
+  echo "${C_DIM}下一步：${C_RESET}"
+  echo "  ${C_BOLD}·${C_RESET} 重启一次电脑（触控板/听写等系统设置才完全生效）"
+  echo "  ${C_BOLD}·${C_RESET} 查看 ${C_BOLD}~/.Brewfile.manual.txt${C_RESET} 手动装剩下的（WorkBuddy 等司内软件）"
+  echo "  ${C_BOLD}·${C_RESET} 双击桌面「补装海外软件.command」补 Chrome/Claude/ChatGPT（需外网）"
+  echo "  ${C_BOLD}·${C_RESET} 系统设置 → 隐私与安全性 → 辅助功能：勾选 Raycast / Loop"
+  echo ""
+  echo "${C_DIM}如个别软件未装成功，直接重跑本命令即可继续补齐（已装的会跳过）。${C_RESET}"
   hr
 }
 
