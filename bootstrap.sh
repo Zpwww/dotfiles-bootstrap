@@ -210,17 +210,104 @@ install_github_token() {
 
 run_chezmoi() {
   local repo="https://github.com/${DOTFILES_SLUG}.git"
+
+  # ─── shell 前置问答：可控回显 + 输入校验 + 立刻反馈 ───
+  # 为什么不让 chezmoi 模板自己问？
+  # 实测 promptIntOnce 在 chezmoi 命令行输出流里，用户输 1 之后没有任何回显，
+  # 视觉上像"被吃掉了"。把交互提前到 shell 层，问完把答案通过
+  # --promptInt/--promptString/--promptBool 精确注入 chezmoi 模板，
+  # 模板里保留 promptXxxOnce 兜底(以后单跑 chezmoi apply 时也能用)。
+  #
+  # 幂等：如果 ~/.config/chezmoi/chezmoi.toml 已存在,说明角色等已缓存过,
+  # 跳过所有问题,直接 chezmoi init --apply 用已有配置继续。
+  local toml="$HOME/.config/chezmoi/chezmoi.toml"
+  local prompt_args=()
+  if [ -f "$toml" ] && grep -q '^role' "$toml" 2>/dev/null; then
+    ok "检测到已有 chezmoi 配置，跳过选择题，直接应用。"
+  else
+    echo ""
+    title "📋 5 道选择题（只问一次，答案写入 $toml 后永不再问）"
+    echo ""
+
+    # ① 机器角色
+    local role_num=""
+    while true; do
+      echo "${C_BOLD}① 这台机器的角色？${C_RESET}"
+      echo "   [1] mobile — MacBook Air 移动机（每天带走、轻量、续航优先）"
+      echo "   [2] studio — Mac Mini 大模型工作站（常开、跑本地 LLM）"
+      echo "   [3] work   — MacBook Pro 公司主力（重开发+内网应用）"
+      printf "   请输入数字 1/2/3： "
+      read -r role_num </dev/tty
+      case "$role_num" in
+        1) echo "   ${C_GREEN}✔ 已选：mobile (MacBook Air 移动机)${C_RESET}"; break ;;
+        2) echo "   ${C_GREEN}✔ 已选：studio (Mac Mini 大模型工作站)${C_RESET}"; break ;;
+        3) echo "   ${C_GREEN}✔ 已选：work (MacBook Pro 公司主力)${C_RESET}"; break ;;
+        *) echo "   ${C_RED}✗ 请输入 1、2 或 3。${C_RESET}" ;;
+      esac
+    done
+    echo ""
+
+    # ② Git 用户名
+    printf "${C_BOLD}② Git 用户名${C_RESET}（回车用默认 ${C_BOLD}ailan${C_RESET}）： "
+    local git_name=""
+    read -r git_name </dev/tty
+    [ -z "$git_name" ] && git_name="ailan"
+    echo "   ${C_GREEN}✔ 已设：$git_name${C_RESET}"
+    echo ""
+
+    # ③ Git 邮箱
+    printf "${C_BOLD}③ Git 邮箱${C_RESET}（回车跳过，日后再补）： "
+    local git_email=""
+    read -r git_email </dev/tty
+    if [ -n "$git_email" ]; then
+      echo "   ${C_GREEN}✔ 已设：$git_email${C_RESET}"
+    else
+      echo "   ${C_GREEN}✔ 跳过（未设邮箱）${C_RESET}"
+    fi
+    echo ""
+
+    # ④ starship 样式
+    local starship_ans="" sync_starship="true"
+    while true; do
+      printf "${C_BOLD}④ 同步 starship 终端提示符样式？${C_RESET}（y/n，回车=y）： "
+      read -r starship_ans </dev/tty
+      case "$starship_ans" in
+        ""|Y|y|Yes|yes) sync_starship="true"; echo "   ${C_GREEN}✔ 已启用 starship 同步${C_RESET}"; break ;;
+        N|n|No|no)      sync_starship="false"; echo "   ${C_GREEN}✔ 关闭 starship 同步${C_RESET}"; break ;;
+        *) echo "   ${C_RED}✗ 请输入 y 或 n（或直接回车用默认 y）。${C_RESET}" ;;
+      esac
+    done
+    echo ""
+
+    # ⑤ SSH 配置
+    local ssh_ans="" sync_ssh="true"
+    local ssh_default="y"; local ssh_default_v="true"
+    [ ! -f "$HOME/.config/chezmoi/key.txt" ] && ssh_default="n" && ssh_default_v="false"
+    while true; do
+      printf "${C_BOLD}⑤ 同步 SSH 配置？${C_RESET}（需要 age 私钥；y/n，回车=$ssh_default）： "
+      read -r ssh_ans </dev/tty
+      if [ -z "$ssh_ans" ]; then ssh_ans="$ssh_default"; fi
+      case "$ssh_ans" in
+        Y|y|Yes|yes) sync_ssh="true"; echo "   ${C_GREEN}✔ 已启用 SSH 同步${C_RESET}"; break ;;
+        N|n|No|no)   sync_ssh="false"; echo "   ${C_GREEN}✔ 关闭 SSH 同步${C_RESET}"; break ;;
+        *) echo "   ${C_RED}✗ 请输入 y 或 n。${C_RESET}" ;;
+      esac
+    done
+    echo ""
+
+    # 用 --promptInt/--promptString/--promptBool 把 shell 答案精确注入模板
+    prompt_args=(
+      --promptInt "roleNum=$role_num"
+      --promptString "name=$git_name"
+      --promptString "email=$git_email"
+      --promptBool "syncStarship=$sync_starship"
+      --promptBool "syncSshConfig=$sync_ssh"
+    )
+  fi
+
   log "拉取并应用私有 dotfiles：$repo"
-  echo ""
-  title "📝 接下来会出现几个中文选择题（很快，只问一次并记住）："
-  echo "  ${C_BOLD}1)${C_RESET} 机器角色：输数字 ${C_BOLD}1${C_RESET}=移动机Air / ${C_BOLD}2${C_RESET}=Mac Mini工作站 / ${C_BOLD}3${C_RESET}=公司主力Pro"
-  echo "  ${C_BOLD}2)${C_RESET} Git 用户名/邮箱：可直接按回车跳过（不影响装机）"
-  echo "  ${C_BOLD}3)${C_RESET} 是否同步 starship 终端样式：一般选 ${C_BOLD}y${C_RESET}"
-  echo "  ${C_BOLD}4)${C_RESET} 是否同步 SSH 配置：vault 已恢复密钥，可选 ${C_BOLD}y${C_RESET}"
-  echo "${C_DIM}   （若提示某文件已被改动，会自动用仓库版本覆盖，无需你选择）${C_RESET}"
-  echo ""
   # 冲突时自动用仓库版覆盖，不打断用户（个人手动改过 gitconfig 等会触发）
-  chezmoi init --apply --guess-repo-url=false --force "$repo"
+  chezmoi init --apply --guess-repo-url=false --force "${prompt_args[@]}" "$repo"
 }
 
 ensure_software() {
@@ -328,7 +415,7 @@ main() {
   echo "  幕 2 · 解密身份       — 需要输入 ${C_YELLOW}【vault 装机密码】${C_RESET}"
   echo "  幕 3 · 拉取仓库&选择题 — 需要输入 ${C_YELLOW}【开机密码】${C_RESET} + 回答机器角色等"
   echo "  幕 4 · 注入系统设置   — 自动（触控板、听写、电源策略等）"
-  echo "  幕 5 · 批量装软件     — 自动（约 15-30 分钟，逐条进度+心跳）"
+  echo "  幕 5 · 批量装软件     — 自动，约 ${C_BOLD}30-60 分钟${C_RESET}（40+ 软件、含 Office/微信大包）"
   echo ""
   echo "${C_DIM}💡 本脚本${C_BOLD}完全幂等${C_RESET}${C_DIM}：中途卡住/失败随时 Ctrl+C，重贴一行命令自动续跑，${C_RESET}"
   echo "${C_DIM}   已完成的步骤会秒判跳过，绝不重复浪费时间。${C_RESET}"
