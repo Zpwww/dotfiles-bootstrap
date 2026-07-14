@@ -254,10 +254,10 @@ run_chezmoi() {
     echo ""
 
     # ② Git 用户名
-    printf "${C_BOLD}② Git 用户名${C_RESET}（回车用默认 ${C_BOLD}ailan${C_RESET}）： "
+    printf "${C_BOLD}② Git 用户名${C_RESET}（回车用默认 ${C_BOLD}Zpwww${C_RESET}，即你的 GitHub 用户名）： "
     local git_name=""
     read -r git_name </dev/tty
-    [ -z "$git_name" ] && git_name="ailan"
+    [ -z "$git_name" ] && git_name="Zpwww"
     echo "   ${C_GREEN}✔ 已设：$git_name${C_RESET}"
     echo ""
 
