@@ -273,11 +273,12 @@ run_chezmoi() {
     echo ""
 
     # ④ starship 样式
-    local starship_ans="" sync_starship="true"
+    local starship_ans=""
+    local sync_starship="true"
     while true; do
       printf "${C_BOLD}④ 同步 starship 终端提示符样式？${C_RESET}（y/n，回车=y）： "
       read -r starship_ans </dev/tty
-      case "$starship_ans" in
+      case "${starship_ans}" in
         ""|Y|y|Yes|yes) sync_starship="true"; echo "   ${C_GREEN}✔ 已启用 starship 同步${C_RESET}"; break ;;
         N|n|No|no)      sync_starship="false"; echo "   ${C_GREEN}✔ 关闭 starship 同步${C_RESET}"; break ;;
         *) echo "   ${C_RED}✗ 请输入 y 或 n（或直接回车用默认 y）。${C_RESET}" ;;
@@ -286,13 +287,18 @@ run_chezmoi() {
     echo ""
 
     # ⑤ SSH 配置
-    local ssh_ans="" sync_ssh="true"
-    local ssh_default="y"; local ssh_default_v="true"
-    [ ! -f "$HOME/.config/chezmoi/key.txt" ] && ssh_default="n" && ssh_default_v="false"
+    # 智能默认：本机已有 age 私钥→默认 y；没有→默认 n（避免用户装到一半才发现解不了密）。
+    # 全部变量单行 local 声明,避免 bash 3.2 与 set -u 的边角行为。
+    local ssh_ans=""
+    local sync_ssh="true"
+    local ssh_default="y"
+    if [ ! -f "$HOME/.config/chezmoi/key.txt" ]; then
+        ssh_default="n"
+    fi
     while true; do
-      printf "${C_BOLD}⑤ 同步 SSH 配置？${C_RESET}（需要 age 私钥；y/n，回车=$ssh_default）： "
+      printf "${C_BOLD}⑤ 同步 SSH 配置？${C_RESET}（需要 age 私钥；y/n，回车=${ssh_default}）： "
       read -r ssh_ans </dev/tty
-      if [ -z "$ssh_ans" ]; then ssh_ans="$ssh_default"; fi
+      if [ -z "$ssh_ans" ]; then ssh_ans="${ssh_default}"; fi
       case "$ssh_ans" in
         Y|y|Yes|yes) sync_ssh="true"; echo "   ${C_GREEN}✔ 已启用 SSH 同步${C_RESET}"; break ;;
         N|n|No|no)   sync_ssh="false"; echo "   ${C_GREEN}✔ 关闭 SSH 同步${C_RESET}"; break ;;
