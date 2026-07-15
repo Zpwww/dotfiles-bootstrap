@@ -48,8 +48,22 @@ ok()      { printf '%s✓%s %s\n' "$C_GREEN"  "$C_RESET" "$*"; }
 hint()    { printf '%s  %s%s\n' "$C_DIM"    "$*"       "$C_RESET"; }
 # action: 醒目 CTA(黄底加粗),用于"你下一步该做什么"
 action()  { printf '%s→%s %s%s%s\n' "$C_YELLOW" "$C_RESET" "$C_BOLD" "$*" "$C_RESET"; }
-# section: 统一分组标题(蓝底加粗),给所有子脚本用同一格式
-section() { printf '\n%s━━ %s ━━%s\n' "$C_BOLD$C_BLUE" "$*" "$C_RESET"; }
+# stage: 顶层阶段标题(4 大步),编号 + 标题 + 简介, 全屏最醒目
+# 格式:
+#   ┌──────────────────────────────────────────
+#   │  [N/4]  阶段标题
+#   │         简介文字
+#   └──────────────────────────────────────────
+stage() {
+    local num="$1" title="$2" desc="$3"
+    echo ""
+    printf '%s┌─────────────────────────────────────────────%s\n' "$C_BOLD$C_BLUE" "$C_RESET"
+    printf '%s│  [%s]  %s%s\n' "$C_BOLD$C_BLUE" "$num" "$title" "$C_RESET"
+    [ -n "$desc" ] && printf '%s│  %s%s%s\n' "$C_BOLD$C_BLUE" "$C_DIM$C_RESET" "$desc" "$C_RESET"
+    printf '%s└─────────────────────────────────────────────%s\n' "$C_BOLD$C_BLUE" "$C_RESET"
+}
+# section: 阶段内的子模块标题(比 stage 轻一档)
+section() { printf '\n%s▸ %s%s\n' "$C_BOLD$C_BLUE" "$*" "$C_RESET"; }
 
 # ─── 命令三件套 (rustup 风格) ────────────────────────────────────────────
 check_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -449,13 +463,13 @@ fetch_source() {
 apply_dotfiles() {
     local src="$HOME/.local/share/chezmoi"
 
-    section "同步 dotfiles 源码"
+    section "拉取 dotfiles 源码"
     if ! fetch_source "$src"; then
         error "所有加速站+直连全部失败,请换个网络重试"
         exit 1
     fi
 
-    section "装软件 + 应用配置"
+    section "应用 dotfiles (触发装软件 + 个人偏好同步)"
     ensure chezmoi init --apply --guess-repo-url=false --force --source="$src"
 }
 
@@ -470,42 +484,52 @@ run_local_hook() {
     fi
 }
 
-# ─── 收尾 (MECE: 状态 → 失败清单 → 下一步 CTA, 从上到下一屏读完) ─────
+# ─── 收尾 (金字塔: 状态概览 → 失败明细 → CTA) ─────────────────────────
 show_finish() {
     local setup_dir="$HOME/Desktop/🍉 Mac 装机"
     local retry="$HOME/.local/state/dotfiles-install-logs/last_failed.Brewfile"
 
-    section "装机完成"
-
+    # 一级: 状态概览
     if [ -s "$retry" ]; then
         local n; n=$(wc -l < "$retry" | tr -d ' ')
-        warn "$n 个软件未装成功:"
-        # 直接把失败清单打出来,不让用户往上翻
-        awk '{gsub(/"/,"",$2); printf "    %s✗%s %s (%s)\n", "'"$C_RED"'", "'"$C_RESET"'", $2, $1}' "$retry"
-        echo ""
-        action "重试失败软件: bash bootstrap.sh retry"
+        warn "$n 个软件安装失败:"
+        # 二级: 失败明细,直接列出让用户不用往上翻
+        awk '{gsub(/"/,"",$2); printf "    %s✗%s %s %s(%s)%s\n", "'"$C_RED"'", "'"$C_RESET"'", $2, "'"$C_DIM"'", $1, "'"$C_RESET"'"}' "$retry"
     else
-        ok "全部软件装完 ✨"
-        echo ""
+        ok "所有软件已装完 ✨"
     fi
-    action "下一步: 打开 ~/Desktop/🍉 Mac 装机/ 按 01→05 顺序做完"
+    echo ""
+
+    # 三级: CTA (只 2-3 条,按优先级排)
+    if [ -s "$retry" ]; then
+        action "重试失败软件: bash bootstrap.sh retry"
+    fi
+    action "打开桌面「🍉 Mac 装机」文件夹,按 01→05 依次完成"
+    hint "  日志: ~/.local/state/dotfiles-install-logs/"
     echo ""
 }
 
 # ─── 命令入口 ───────────────────────────────────────────────────────────
 cmd_install() {
+    stage "1/4" "环境准备" "管理员权限 / Xcode CLT / Homebrew / 核心工具"
     check_admin
     acquire_sudo
     install_clt
     install_brew
     install_core_tools
     persist_shellenv
+
+    stage "2/4" "身份与密钥" "解密 vault / age 私钥 / GitHub 凭证 / 5 题选择"
     decrypt_vault
     install_age_key
     install_github_creds
     collect_answers
+
+    stage "3/4" "装软件与配置" "拉源码 / brew 软件包 / VS Code 插件 / 个人偏好"
     apply_dotfiles
     run_local_hook
+
+    stage "4/4" "装机完成" "查看状态与下一步"
     show_finish
 }
 
