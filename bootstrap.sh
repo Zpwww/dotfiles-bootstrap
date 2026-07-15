@@ -169,14 +169,31 @@ download_and_decrypt_vault() {
   echo "${C_YELLOW}${C_BOLD}🔐 需要输入：【vault 装机密码】（不是这台电脑的开机密码！）${C_RESET}"
   echo "${C_DIM}   这是你之前专门为装机设定的那个密码，用来解开加密的密钥包。"
   echo "   下面会出现一行英文 “Enter passphrase:”，那就是让你输这个密码。"
-  echo "   输入时屏幕不显示任何字符，这是正常的，输完按回车。${C_RESET}"
+  echo "   输入时屏幕不显示任何字符，这是正常的，输完按回车。"
+  echo "   最多可以尝试 3 次,输错不会退出装机。${C_RESET}"
   hr
-  if ! age -d "$vault_file" > "$env_file"; then
-    echo ""
-    err "vault 解密失败：密码不对，或 vault 文件损坏。"
-    echo "${C_DIM}   提示：这里要输的是【vault 装机密码】，不是电脑开机密码。可重新运行本命令再试。${C_RESET}"
-    exit 1
-  fi
+
+  # 允许最多 3 次密码尝试,输错不直接退出——防止误输导致前面全白干。
+  local attempt=0
+  local max_attempts=3
+  while [ $attempt -lt $max_attempts ]; do
+    attempt=$((attempt + 1))
+    if age -d "$vault_file" > "$env_file" 2>/dev/null; then
+      break
+    fi
+    if [ $attempt -lt $max_attempts ]; then
+      echo ""
+      warn "vault 解密失败(第 $attempt/$max_attempts 次)。"
+      echo "${C_DIM}   提示：这里要输的是【vault 装机密码】,不是电脑开机密码。${C_RESET}"
+      echo "${C_DIM}   继续尝试(还剩 $((max_attempts - attempt)) 次)...${C_RESET}"
+    else
+      echo ""
+      err "vault 解密连续失败 $max_attempts 次,无法继续。"
+      echo "${C_DIM}   如果确认密码正确但仍失败,可能是 vault 文件损坏——"
+      echo "   请检查 https://github.com/Zpwww/dotfiles-bootstrap 是否有更新。${C_RESET}"
+      exit 1
+    fi
+  done
 
   # shellcheck disable=SC1090
   set -a
@@ -216,12 +233,12 @@ install_github_token() {
 
 run_chezmoi_prompts_only() {
   # ─── shell 前置问答：可控回显 + 输入校验 + 立刻反馈 ───
-  # 只问,不 apply。apply 由 run_chezmoi_apply 单独负责,便于幕头有序。
+  # 收完 5 题后直接预填 ~/.config/chezmoi/chezmoi.toml,
+  # chezmoi init 检测到配置已存在就不会再渲染模板,promptXxxOnce 一次都不会被调用。
+  # (这是绕开"chezmoi init 时重复问询"的唯一可靠办法——上次踩过 --override-data-file 的坑)
   #
-  # 幂等：如果 ~/.config/chezmoi/chezmoi.toml 已存在,说明角色等已缓存过,
-  # 跳过所有问题,不产生 override_file(chezmoi apply 时用 promptXxxOnce 兜底命中缓存)。
+  # 幂等：如果 ~/.config/chezmoi/chezmoi.toml 已存在,说明角色等已缓存过,跳过所有问题。
   local toml="$HOME/.config/chezmoi/chezmoi.toml"
-  CHEZMOI_OVERRIDE_FILE=""   # 全局变量,给 run_chezmoi_apply 用
   if [ -f "$toml" ] && grep -q '^role' "$toml" 2>/dev/null; then
     ok "检测到已有 chezmoi 配置，跳过选择题（首次装机之后不再问）。"
     return
@@ -300,31 +317,63 @@ run_chezmoi_prompts_only() {
   done
   echo ""
 
-  # 写 override 文件给 chezmoi init 用。
-  # 关键:用 --override-data-file 而非 --promptInt(后者不填 Once 版本)。
-  CHEZMOI_OVERRIDE_FILE="$TMP_DIR/chezmoi-answers.json"
-  cat > "$CHEZMOI_OVERRIDE_FILE" <<EOF
-{
-  "roleNum": $role_num,
-  "name": "$git_name",
-  "email": "$git_email",
-  "syncStarship": $sync_starship,
-  "syncSshConfig": $sync_ssh
-}
+  # 写完整 chezmoi.toml 让 chezmoi init 直接跳过所有 prompt。
+  # 关键:chezmoi init 检测到 ~/.config/chezmoi/chezmoi.toml 已存在时,
+  # 就不会再渲染 .chezmoi.toml.tmpl,promptXxxOnce 一次都不会被调用。
+  # 这是绕开"重复问询"的唯一可靠办法(--override-data-file 只作用于模板执行阶段,
+  # chezmoi init 生成配置那一步不看它——上次踩过的坑)。
+  mkdir -p "$HOME/.config/chezmoi"
+
+  # 派生 role/roleFlags(和模板逻辑保持一致)
+  local role_str="work"
+  case "$role_num" in
+    1) role_str="mobile" ;;
+    2) role_str="studio" ;;
+    3) role_str="work" ;;
+  esac
+  local is_mobile="false"; local is_studio="false"; local is_work="false"
+  local is_heavy="false"; local needs_enterprise="false"; local is_always_on="false"
+  case "$role_str" in
+    mobile) is_mobile="true" ;;
+    studio) is_studio="true"; is_heavy="true"; is_always_on="true" ;;
+    work)   is_work="true"; is_heavy="true"; needs_enterprise="true" ;;
+  esac
+  local brew_prefix="/opt/homebrew"
+  [ "$(uname -m)" != "arm64" ] && brew_prefix="/usr/local"
+
+  cat > "$HOME/.config/chezmoi/chezmoi.toml" <<EOF
+encryption = "age"
+
+[age]
+    identity = "~/.config/chezmoi/key.txt"
+    recipient = "age1gu9dhr2az6ndjxdy00rf29r2aqaw9skm8683n0ds08mzlqv9p3gq8u7wts"
+
+[data]
+    roleNum = $role_num
+    role = "$role_str"
+    name = "$git_name"
+    email = "$git_email"
+    syncStarship = $sync_starship
+    syncSshConfig = $sync_ssh
+    brewPrefix = "$brew_prefix"
+
+[data.roleFlags]
+    isMobile = $is_mobile
+    isStudio = $is_studio
+    isWork = $is_work
+    isHeavy = $is_heavy
+    needsEnterprise = $needs_enterprise
+    isAlwaysOn = $is_always_on
 EOF
-  ok "5 题已收集,准备应用。"
+  ok "5 题已收集,配置已写入 ~/.config/chezmoi/chezmoi.toml"
 }
 
 run_chezmoi_apply() {
   local repo="https://github.com/${DOTFILES_SLUG}.git"
   log "拉取并应用私有 dotfiles：$repo"
-  # 冲突时自动用仓库版覆盖，不打断用户
-  if [ -n "${CHEZMOI_OVERRIDE_FILE:-}" ] && [ -f "$CHEZMOI_OVERRIDE_FILE" ]; then
-    chezmoi init --apply --guess-repo-url=false --force \
-      --override-data-file "$CHEZMOI_OVERRIDE_FILE" "$repo"
-  else
-    chezmoi init --apply --guess-repo-url=false --force "$repo"
-  fi
+  # chezmoi.toml 已由 run_chezmoi_prompts_only 预填,init 检测到不再问 prompt。
+  # --force: 冲突时用仓库版覆盖(处理个人手动改过 gitconfig 等场景)。
+  chezmoi init --apply --guess-repo-url=false --force "$repo"
 }
 
 ensure_software() {
