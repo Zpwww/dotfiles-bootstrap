@@ -359,11 +359,13 @@ EOF
 # ─── chezmoi 应用 ──────────────────────────────────────────────────────
 # clone_with_fallback: 依次试多个加速站真实 clone(不是握手探测)
 # 每个加速站都带低速熔断(20KB/s 持续 15s 就切下一个),彻底避免 GFW 中间断流干挂。
+# 注意: 用 clone 后判断 .git 目录是否真实存在,不能依赖 pipeline 退出码。
 clone_with_fallback() {
     local dst="$1"
     local base_url="https://github.com/${DOTFILES_SLUG}.git"
 
-    for accel in "https://gh-proxy.com/" "https://ghproxy.net/" "https://github.akams.cn/" ""; do
+    # 加速站清单(按国内常见可用度排序,gh-proxy.com 对 git 协议返 HTML 已剔除)
+    for accel in "https://ghfast.top/" "https://ghproxy.net/" "https://github.akams.cn/" "https://mirror.ghproxy.com/" ""; do
         local try_url="${accel}${base_url}"
         rm -rf "$dst" 2>/dev/null
         if [ -n "$accel" ]; then
@@ -371,14 +373,18 @@ clone_with_fallback() {
         else
             info "clone via GitHub 直连 ..."
         fi
+        # 直接 clone, 不 pipe (pipeline 会掩盖真实退出码)
         if GIT_TERMINAL_PROMPT=0 git \
              -c http.lowSpeedLimit=20480 -c http.lowSpeedTime=15 \
-             clone --depth=1 "$try_url" "$dst" 2>&1 | \
-             grep -vE '^Cloning into|^remote:' >&2; then
-            ok "clone 成功"
-            return 0
+             clone --depth=1 "$try_url" "$dst" 2>&1; then
+            # 二次校验: .git 目录真的存在, 才算成功
+            if [ -d "$dst/.git" ]; then
+                ok "clone 成功 via ${accel:-直连}"
+                return 0
+            fi
         fi
         warn "此加速站失败,换下一个"
+        rm -rf "$dst" 2>/dev/null
     done
     return 1
 }
@@ -392,7 +398,7 @@ apply_dotfiles() {
         local base_url="https://github.com/${DOTFILES_SLUG}.git"
         local orig_remote; orig_remote="$(git -C "$src" remote get-url origin 2>/dev/null || echo "$base_url")"
         local ok_flag=""
-        for accel in "https://gh-proxy.com/" "https://ghproxy.net/" "https://github.akams.cn/" ""; do
+        for accel in "https://ghfast.top/" "https://ghproxy.net/" "https://github.akams.cn/" "https://mirror.ghproxy.com/" ""; do
             git -C "$src" remote set-url origin "${accel}${base_url}" 2>/dev/null || true
             if GIT_TERMINAL_PROMPT=0 git -C "$src" \
                  -c http.lowSpeedLimit=20480 -c http.lowSpeedTime=15 \
