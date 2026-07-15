@@ -361,16 +361,22 @@ apply_dotfiles() {
     local src="$HOME/.local/share/chezmoi"
     local base_url="https://github.com/${DOTFILES_SLUG}.git"
 
-    # 决定用哪个 URL clone/fetch: 依次试直连和加速站,取第一个通的
-    # 加速站列表: 直连(优先,速度最快) → gh-proxy → ghproxy.net → akams
+    # 决定用哪个 URL clone/fetch: 加速站优先, 直连兜底
+    # 原因: 国内直连 ls-remote 常常能通(几百字节握手),但真 clone 传到中间会被 GFW 断连,
+    # 造成'error: RPC failed; curl 56 Recv failure: Connection reset by peer'。
+    # 加速站是 CDN, 稳定得多。
     local resolved_url=""
-    for accel in "" "https://gh-proxy.com/" "https://ghproxy.net/" "https://github.akams.cn/"; do
+    for accel in "https://gh-proxy.com/" "https://ghproxy.net/" "https://github.akams.cn/" ""; do
         local try_url="${accel}${base_url}"
         if GIT_TERMINAL_PROMPT=0 git \
              -c http.lowSpeedLimit=10000 -c http.lowSpeedTime=8 \
              ls-remote "$try_url" HEAD >/dev/null 2>&1; then
             resolved_url="$try_url"
-            [ -n "$accel" ] && info "使用加速站: ${accel%/}"
+            if [ -n "$accel" ]; then
+                info "使用加速站: ${accel%/}"
+            else
+                info "使用 GitHub 直连"
+            fi
             break
         fi
     done
