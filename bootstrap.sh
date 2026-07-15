@@ -402,9 +402,9 @@ run_local_hook() {
     fi
 }
 
-# ─── 收尾 (MECE: 只讲状态和 next-step 入口,详情全指向 装机待办.md) ────
+# ─── 收尾 (MECE: 只讲状态和 next-step 入口,详情在桌面文件夹) ─────────
 show_finish() {
-    local todo="$HOME/Desktop/装机待办.md"
+    local setup_dir="$HOME/Desktop/🍉 Mac 装机"
     local retry="$HOME/.local/state/dotfiles-install-logs/last_failed.Brewfile"
 
     echo ""
@@ -415,7 +415,7 @@ show_finish() {
     else
         ok "装机完成 ✨"
     fi
-    hint "  待办清单: $todo (桌面上,双击查看)"
+    hint "  下一步: 打开桌面「🍉 Mac 装机」文件夹,按 01→05 顺序完成"
     echo ""
 }
 
