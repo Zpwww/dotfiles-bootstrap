@@ -13,7 +13,7 @@ cleanup() { rm -f "$TMP_ENV"; }
 trap cleanup EXIT
 
 AGE_KEY_PATH="${AGE_KEY_PATH:-$HOME/.config/chezmoi/key.txt}"
-DOTFILES_SLUG="${DOTFILES_SLUG:-Zpwww/dotfiles}"
+DOTFILES_SLUG="${DOTFILES_SLUG:-Zpwww/dotfiles-bootstrap}"
 GITHUB_USERNAME="${GITHUB_USERNAME:-Zpwww}"
 
 encode_b64() {

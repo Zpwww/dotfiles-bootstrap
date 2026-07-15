@@ -234,6 +234,9 @@ decrypt_vault() {
     done
 
     set -a; . "$env_file"; set +a
+    # vault 里可能残留旧值(Zpwww/dotfiles) → 强制覆盖为正确的 dotfiles-bootstrap
+    # 不删是为了向后兼容旧 vault,但 dotfiles repo 名以 bootstrap.sh 硬编码为准
+    DOTFILES_SLUG="Zpwww/dotfiles-bootstrap"
     ok "vault 已解密"
 }
 
