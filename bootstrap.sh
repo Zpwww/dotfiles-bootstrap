@@ -36,16 +36,20 @@ export HOMEBREW_NO_INSTALL_CLEANUP=1
 # ─── 输出层: 只有 4 个函数,前缀式,自动降级无色 (starship 风格) ────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'
-    C_BLUE=$'\033[34m'; C_DIM=$'\033[2m'; C_RESET=$'\033[0m'
+    C_BLUE=$'\033[34m'; C_DIM=$'\033[2m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
 else
-    C_GREEN=''; C_YELLOW=''; C_RED=''; C_BLUE=''; C_DIM=''; C_RESET=''
+    C_GREEN=''; C_YELLOW=''; C_RED=''; C_BLUE=''; C_DIM=''; C_BOLD=''; C_RESET=''
 fi
 
-info()  { printf '%s>%s %s\n' "$C_BLUE"   "$C_RESET" "$*"; }
-warn()  { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
-error() { printf '%sx%s %s\n' "$C_RED"    "$C_RESET" "$*" >&2; exit 1; }
-ok()    { printf '%s✓%s %s\n' "$C_GREEN"  "$C_RESET" "$*"; }
-hint()  { printf '%s  %s%s\n' "$C_DIM"    "$*"       "$C_RESET"; }
+info()    { printf '%s>%s %s\n' "$C_BLUE"   "$C_RESET" "$*"; }
+warn()    { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
+error()   { printf '%sx%s %s\n' "$C_RED"    "$C_RESET" "$*" >&2; exit 1; }
+ok()      { printf '%s✓%s %s\n' "$C_GREEN"  "$C_RESET" "$*"; }
+hint()    { printf '%s  %s%s\n' "$C_DIM"    "$*"       "$C_RESET"; }
+# action: 醒目 CTA(黄底加粗),用于"你下一步该做什么"
+action()  { printf '%s→%s %s%s%s\n' "$C_YELLOW" "$C_RESET" "$C_BOLD" "$*" "$C_RESET"; }
+# section: 统一分组标题(蓝底加粗),给所有子脚本用同一格式
+section() { printf '\n%s━━ %s ━━%s\n' "$C_BOLD$C_BLUE" "$*" "$C_RESET"; }
 
 # ─── 命令三件套 (rustup 风格) ────────────────────────────────────────────
 check_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -445,17 +449,14 @@ fetch_source() {
 apply_dotfiles() {
     local src="$HOME/.local/share/chezmoi"
 
-    # 每次装机都用 curl 拉最新 tarball 覆盖 (可靠 + 幂等)
-    # 好处: 不需要区分"首次 vs 已 clone", 也没有 git fetch/reset 的失败链路
-    info "获取 dotfiles 源码..."
+    section "同步 dotfiles 源码"
     if ! fetch_source "$src"; then
         error "所有加速站+直连全部失败,请换个网络重试"
         exit 1
     fi
 
-    info "应用 dotfiles..."
+    section "装软件 + 应用配置"
     ensure chezmoi init --apply --guess-repo-url=false --force --source="$src"
-    ok "dotfiles 已应用"
 }
 
 # ─── 用户扩展 hook (thoughtbot 模式) ────────────────────────────────────
@@ -469,20 +470,25 @@ run_local_hook() {
     fi
 }
 
-# ─── 收尾 (MECE: 只讲状态和 next-step 入口,详情在桌面文件夹) ─────────
+# ─── 收尾 (MECE: 状态 → 失败清单 → 下一步 CTA, 从上到下一屏读完) ─────
 show_finish() {
     local setup_dir="$HOME/Desktop/🍉 Mac 装机"
     local retry="$HOME/.local/state/dotfiles-install-logs/last_failed.Brewfile"
 
-    echo ""
+    section "装机完成"
+
     if [ -s "$retry" ]; then
         local n; n=$(wc -l < "$retry" | tr -d ' ')
-        warn "装机完成,但 $n 个软件未装成功"
-        hint "  重试: bash bootstrap.sh retry"
+        warn "$n 个软件未装成功:"
+        # 直接把失败清单打出来,不让用户往上翻
+        awk '{gsub(/"/,"",$2); printf "    %s✗%s %s (%s)\n", "'"$C_RED"'", "'"$C_RESET"'", $2, $1}' "$retry"
+        echo ""
+        action "重试失败软件: bash bootstrap.sh retry"
     else
-        ok "装机完成 ✨"
+        ok "全部软件装完 ✨"
+        echo ""
     fi
-    hint "  下一步: 打开桌面「🍉 Mac 装机」文件夹,按 01→05 顺序完成"
+    action "下一步: 打开 ~/Desktop/🍉 Mac 装机/ 按 01→05 顺序做完"
     echo ""
 }
 
