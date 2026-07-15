@@ -357,51 +357,67 @@ EOF
 }
 
 # ─── chezmoi 应用 ──────────────────────────────────────────────────────
-apply_dotfiles() {
-    local src="$HOME/.local/share/chezmoi"
+# clone_with_fallback: 依次试多个加速站真实 clone(不是握手探测)
+# 每个加速站都带低速熔断(20KB/s 持续 15s 就切下一个),彻底避免 GFW 中间断流干挂。
+clone_with_fallback() {
+    local dst="$1"
     local base_url="https://github.com/${DOTFILES_SLUG}.git"
 
-    # 决定用哪个 URL clone/fetch: 加速站优先, 直连兜底
-    # 原因: 国内直连 ls-remote 常常能通(几百字节握手),但真 clone 传到中间会被 GFW 断连,
-    # 造成'error: RPC failed; curl 56 Recv failure: Connection reset by peer'。
-    # 加速站是 CDN, 稳定得多。
-    local resolved_url=""
     for accel in "https://gh-proxy.com/" "https://ghproxy.net/" "https://github.akams.cn/" ""; do
         local try_url="${accel}${base_url}"
-        if GIT_TERMINAL_PROMPT=0 git \
-             -c http.lowSpeedLimit=10000 -c http.lowSpeedTime=8 \
-             ls-remote "$try_url" HEAD >/dev/null 2>&1; then
-            resolved_url="$try_url"
-            if [ -n "$accel" ]; then
-                info "使用加速站: ${accel%/}"
-            else
-                info "使用 GitHub 直连"
-            fi
-            break
+        rm -rf "$dst" 2>/dev/null
+        if [ -n "$accel" ]; then
+            info "clone via ${accel%/} ..."
+        else
+            info "clone via GitHub 直连 ..."
         fi
+        if GIT_TERMINAL_PROMPT=0 git \
+             -c http.lowSpeedLimit=20480 -c http.lowSpeedTime=15 \
+             clone --depth=1 "$try_url" "$dst" 2>&1 | \
+             grep -vE '^Cloning into|^remote:' >&2; then
+            ok "clone 成功"
+            return 0
+        fi
+        warn "此加速站失败,换下一个"
     done
-    [ -z "$resolved_url" ] && resolved_url="$base_url"  # 全挂时仍用直连兜底
+    return 1
+}
 
-    # 情况 A: 已 clone 过 → git fetch + reset 拉最新
+apply_dotfiles() {
+    local src="$HOME/.local/share/chezmoi"
+
+    # 情况 A: 已 clone 过 → 用同样的加速链兜底 fetch
     if [ -d "$src/.git" ] && [ ! -L "$src" ]; then
         info "更新 dotfiles 源码..."
+        local base_url="https://github.com/${DOTFILES_SLUG}.git"
         local orig_remote; orig_remote="$(git -C "$src" remote get-url origin 2>/dev/null || echo "$base_url")"
-        git -C "$src" remote set-url origin "$resolved_url" 2>/dev/null || true
-        if GIT_TERMINAL_PROMPT=0 git -C "$src" \
-             -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15 \
-             fetch origin main >/dev/null 2>&1; then
+        local ok_flag=""
+        for accel in "https://gh-proxy.com/" "https://ghproxy.net/" "https://github.akams.cn/" ""; do
+            git -C "$src" remote set-url origin "${accel}${base_url}" 2>/dev/null || true
+            if GIT_TERMINAL_PROMPT=0 git -C "$src" \
+                 -c http.lowSpeedLimit=20480 -c http.lowSpeedTime=15 \
+                 fetch origin main >/dev/null 2>&1; then
+                ok_flag=1
+                break
+            fi
+        done
+        if [ -n "$ok_flag" ]; then
             git -C "$src" reset --hard FETCH_HEAD >/dev/null 2>&1 && ok "源码已更新" \
                 || warn "源码重置失败,用本机版继续"
         else
-            warn "源码更新失败,用本机版继续"
+            warn "源码更新失败(所有加速站+直连都超时),用本机版继续"
         fi
         git -C "$src" remote set-url origin "$orig_remote" 2>/dev/null || true
         info "应用 dotfiles..."
         ensure chezmoi apply --force
     else
-        # 情况 B: 首次 clone → 用探测到的加速 URL
+        # 情况 B: 首次 clone → 我们自己 clone,不让 chezmoi 内部起子进程
         info "首次 clone dotfiles..."
-        ensure chezmoi init --apply --guess-repo-url=false --force "$resolved_url"
+        clone_with_fallback "$src" || {
+            error "所有加速站+直连全部失败,请换个网络重试"
+        }
+        # chezmoi init 用本地路径,不走网络
+        ensure chezmoi init --apply --guess-repo-url=false --force --source="$src"
     fi
 
     ok "dotfiles 已应用"
