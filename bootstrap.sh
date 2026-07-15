@@ -359,35 +359,45 @@ EOF
 # ─── chezmoi 应用 ──────────────────────────────────────────────────────
 apply_dotfiles() {
     local src="$HOME/.local/share/chezmoi"
-    # 关键: chezmoi 已 clone 过时,先强制拉最新(避免本机残留旧版子脚本)。
-    # 多加速站兜底,网络不通就用本机版继续(不阻塞主流程)。
-    if [ -d "$src/.git" ] && [ ! -L "$src" ]; then
-        info "更新 dotfiles 源码到 GitHub 最新..."
-        local base_url="https://github.com/${DOTFILES_SLUG}.git"
-        local orig_remote; orig_remote="$(git -C "$src" remote get-url origin 2>/dev/null || echo "$base_url")"
-        local fetched=""
-        for accel in "" "https://gh-proxy.com/" "https://ghproxy.net/" "https://github.akams.cn/"; do
-            if [ -n "$accel" ]; then
-                git -C "$src" remote set-url origin "${accel}${base_url}" 2>/dev/null || continue
-            fi
-            if GIT_TERMINAL_PROMPT=0 git -C "$src" \
-                 -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15 \
-                 fetch origin main >/dev/null 2>&1; then
-                fetched=1
-                break
-            fi
-        done
-        git -C "$src" remote set-url origin "$orig_remote" 2>/dev/null || true
-        if [ -n "$fetched" ]; then
-            git -C "$src" reset --hard FETCH_HEAD >/dev/null 2>&1 && ok "源码已更新" || warn "源码重置失败,用本机版继续"
-        else
-            warn "源码更新失败(网络不通),用本机版继续"
+    local base_url="https://github.com/${DOTFILES_SLUG}.git"
+
+    # 决定用哪个 URL clone/fetch: 依次试直连和加速站,取第一个通的
+    # 加速站列表: 直连(优先,速度最快) → gh-proxy → ghproxy.net → akams
+    local resolved_url=""
+    for accel in "" "https://gh-proxy.com/" "https://ghproxy.net/" "https://github.akams.cn/"; do
+        local try_url="${accel}${base_url}"
+        if GIT_TERMINAL_PROMPT=0 git \
+             -c http.lowSpeedLimit=10000 -c http.lowSpeedTime=8 \
+             ls-remote "$try_url" HEAD >/dev/null 2>&1; then
+            resolved_url="$try_url"
+            [ -n "$accel" ] && info "使用加速站: ${accel%/}"
+            break
         fi
+    done
+    [ -z "$resolved_url" ] && resolved_url="$base_url"  # 全挂时仍用直连兜底
+
+    # 情况 A: 已 clone 过 → git fetch + reset 拉最新
+    if [ -d "$src/.git" ] && [ ! -L "$src" ]; then
+        info "更新 dotfiles 源码..."
+        local orig_remote; orig_remote="$(git -C "$src" remote get-url origin 2>/dev/null || echo "$base_url")"
+        git -C "$src" remote set-url origin "$resolved_url" 2>/dev/null || true
+        if GIT_TERMINAL_PROMPT=0 git -C "$src" \
+             -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15 \
+             fetch origin main >/dev/null 2>&1; then
+            git -C "$src" reset --hard FETCH_HEAD >/dev/null 2>&1 && ok "源码已更新" \
+                || warn "源码重置失败,用本机版继续"
+        else
+            warn "源码更新失败,用本机版继续"
+        fi
+        git -C "$src" remote set-url origin "$orig_remote" 2>/dev/null || true
+        info "应用 dotfiles..."
+        ensure chezmoi apply --force
+    else
+        # 情况 B: 首次 clone → 用探测到的加速 URL
+        info "首次 clone dotfiles..."
+        ensure chezmoi init --apply --guess-repo-url=false --force "$resolved_url"
     fi
 
-    info "应用 dotfiles..."
-    ensure chezmoi init --apply --guess-repo-url=false --force \
-        "https://github.com/${DOTFILES_SLUG}.git"
     ok "dotfiles 已应用"
 }
 
