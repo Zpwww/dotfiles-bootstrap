@@ -110,10 +110,10 @@ ensure_sudo() {
     err "sudo 授权失败，无法继续安装 Homebrew。请确认输入的是本机开机密码。"
     exit 1
   fi
-  # 后台保活：只要主进程活着，就每 60 秒续期一次 sudo 时间戳。
-  # 这样后续所有子脚本（10 / 20 / 90 / 95）里的 sudo 都能静默通过 sudo -n。
+  # 后台保活：只要主进程活着，就每 30 秒续期一次 sudo 时间戳。
+  # macOS sudo 默认 5 分钟过期,30s 间隔留足 buffer。
   # 主进程退出后 kill -0 失败，自动结束。
-  ( while true; do sudo -n true 2>/dev/null; sleep 50; kill -0 "$$" 2>/dev/null || exit; done ) &
+  ( while true; do sudo -n true 2>/dev/null; sleep 30; kill -0 "$$" 2>/dev/null || exit; done ) &
   SUDO_KEEPALIVE_PID=$!
   ok "已获取管理员授权，全程只需这一次。"
 }
@@ -214,104 +214,96 @@ install_github_token() {
   ok "GitHub 凭证已写入 macOS 钥匙串。"
 }
 
-run_chezmoi() {
-  local repo="https://github.com/${DOTFILES_SLUG}.git"
-
+run_chezmoi_prompts_only() {
   # ─── shell 前置问答：可控回显 + 输入校验 + 立刻反馈 ───
-  # 为什么不让 chezmoi 模板自己问？
-  # 实测 promptIntOnce 在 chezmoi 命令行输出流里，用户输 1 之后没有任何回显，
-  # 视觉上像"被吃掉了"。把交互提前到 shell 层，问完把答案通过
-  # --promptInt/--promptString/--promptBool 精确注入 chezmoi 模板，
-  # 模板里保留 promptXxxOnce 兜底(以后单跑 chezmoi apply 时也能用)。
+  # 只问,不 apply。apply 由 run_chezmoi_apply 单独负责,便于幕头有序。
   #
   # 幂等：如果 ~/.config/chezmoi/chezmoi.toml 已存在,说明角色等已缓存过,
-  # 跳过所有问题,直接 chezmoi init --apply 用已有配置继续。
+  # 跳过所有问题,不产生 override_file(chezmoi apply 时用 promptXxxOnce 兜底命中缓存)。
   local toml="$HOME/.config/chezmoi/chezmoi.toml"
-  local override_file=""
+  CHEZMOI_OVERRIDE_FILE=""   # 全局变量,给 run_chezmoi_apply 用
   if [ -f "$toml" ] && grep -q '^role' "$toml" 2>/dev/null; then
-    ok "检测到已有 chezmoi 配置，跳过选择题，直接应用。"
+    ok "检测到已有 chezmoi 配置，跳过选择题（首次装机之后不再问）。"
+    return
+  fi
+
+  echo ""
+
+  # ① 机器角色
+  local role_num=""
+  while true; do
+    echo "${C_BOLD}① 这台机器的角色？${C_RESET}"
+    echo "   [1] mobile — MacBook Air 移动机（每天带走、轻量、续航优先）"
+    echo "   [2] studio — Mac Mini 大模型工作站（常开、跑本地 LLM）"
+    echo "   [3] work   — MacBook Pro 公司主力（重开发+内网应用）"
+    printf "   请输入数字 1/2/3： "
+    read -r role_num </dev/tty
+    case "$role_num" in
+      1) echo "   ${C_GREEN}✔ 已选：mobile (MacBook Air 移动机)${C_RESET}"; break ;;
+      2) echo "   ${C_GREEN}✔ 已选：studio (Mac Mini 大模型工作站)${C_RESET}"; break ;;
+      3) echo "   ${C_GREEN}✔ 已选：work (MacBook Pro 公司主力)${C_RESET}"; break ;;
+      *) echo "   ${C_RED}✗ 请输入 1、2 或 3。${C_RESET}" ;;
+    esac
+  done
+  echo ""
+
+  # ② Git 用户名
+  printf "${C_BOLD}② Git 用户名${C_RESET}（回车用默认 ${C_BOLD}Zpwww${C_RESET}，即你的 GitHub 用户名）： "
+  local git_name=""
+  read -r git_name </dev/tty
+  [ -z "$git_name" ] && git_name="Zpwww"
+  echo "   ${C_GREEN}✔ 已设：$git_name${C_RESET}"
+  echo ""
+
+  # ③ Git 邮箱
+  printf "${C_BOLD}③ Git 邮箱${C_RESET}（回车跳过，日后再补）： "
+  local git_email=""
+  read -r git_email </dev/tty
+  if [ -n "$git_email" ]; then
+    echo "   ${C_GREEN}✔ 已设：$git_email${C_RESET}"
   else
-    echo ""
-    title "📋 5 道选择题（只问一次，答案写入 $toml 后永不再问）"
-    echo ""
+    echo "   ${C_GREEN}✔ 跳过（未设邮箱）${C_RESET}"
+  fi
+  echo ""
 
-    # ① 机器角色
-    local role_num=""
-    while true; do
-      echo "${C_BOLD}① 这台机器的角色？${C_RESET}"
-      echo "   [1] mobile — MacBook Air 移动机（每天带走、轻量、续航优先）"
-      echo "   [2] studio — Mac Mini 大模型工作站（常开、跑本地 LLM）"
-      echo "   [3] work   — MacBook Pro 公司主力（重开发+内网应用）"
-      printf "   请输入数字 1/2/3： "
-      read -r role_num </dev/tty
-      case "$role_num" in
-        1) echo "   ${C_GREEN}✔ 已选：mobile (MacBook Air 移动机)${C_RESET}"; break ;;
-        2) echo "   ${C_GREEN}✔ 已选：studio (Mac Mini 大模型工作站)${C_RESET}"; break ;;
-        3) echo "   ${C_GREEN}✔ 已选：work (MacBook Pro 公司主力)${C_RESET}"; break ;;
-        *) echo "   ${C_RED}✗ 请输入 1、2 或 3。${C_RESET}" ;;
-      esac
-    done
-    echo ""
+  # ④ starship 样式
+  local starship_ans=""
+  local sync_starship="true"
+  while true; do
+    printf "${C_BOLD}④ 同步 starship 终端提示符样式？${C_RESET}（y/n，回车=y）： "
+    read -r starship_ans </dev/tty
+    case "${starship_ans}" in
+      ""|Y|y|Yes|yes) sync_starship="true"; echo "   ${C_GREEN}✔ 已启用 starship 同步${C_RESET}"; break ;;
+      N|n|No|no)      sync_starship="false"; echo "   ${C_GREEN}✔ 关闭 starship 同步${C_RESET}"; break ;;
+      *) echo "   ${C_RED}✗ 请输入 y 或 n（或直接回车用默认 y）。${C_RESET}" ;;
+    esac
+  done
+  echo ""
 
-    # ② Git 用户名
-    printf "${C_BOLD}② Git 用户名${C_RESET}（回车用默认 ${C_BOLD}Zpwww${C_RESET}，即你的 GitHub 用户名）： "
-    local git_name=""
-    read -r git_name </dev/tty
-    [ -z "$git_name" ] && git_name="Zpwww"
-    echo "   ${C_GREEN}✔ 已设：$git_name${C_RESET}"
-    echo ""
+  # ⑤ SSH 配置
+  # 智能默认：本机已有 age 私钥→默认 y；没有→默认 n。
+  local ssh_ans=""
+  local sync_ssh="true"
+  local ssh_default="y"
+  if [ ! -f "$HOME/.config/chezmoi/key.txt" ]; then
+      ssh_default="n"
+  fi
+  while true; do
+    printf "${C_BOLD}⑤ 同步 SSH 配置？${C_RESET}（需要 age 私钥；y/n，回车=${ssh_default}）： "
+    read -r ssh_ans </dev/tty
+    if [ -z "$ssh_ans" ]; then ssh_ans="${ssh_default}"; fi
+    case "$ssh_ans" in
+      Y|y|Yes|yes) sync_ssh="true"; echo "   ${C_GREEN}✔ 已启用 SSH 同步${C_RESET}"; break ;;
+      N|n|No|no)   sync_ssh="false"; echo "   ${C_GREEN}✔ 关闭 SSH 同步${C_RESET}"; break ;;
+      *) echo "   ${C_RED}✗ 请输入 y 或 n。${C_RESET}" ;;
+    esac
+  done
+  echo ""
 
-    # ③ Git 邮箱
-    printf "${C_BOLD}③ Git 邮箱${C_RESET}（回车跳过，日后再补）： "
-    local git_email=""
-    read -r git_email </dev/tty
-    if [ -n "$git_email" ]; then
-      echo "   ${C_GREEN}✔ 已设：$git_email${C_RESET}"
-    else
-      echo "   ${C_GREEN}✔ 跳过（未设邮箱）${C_RESET}"
-    fi
-    echo ""
-
-    # ④ starship 样式
-    local starship_ans=""
-    local sync_starship="true"
-    while true; do
-      printf "${C_BOLD}④ 同步 starship 终端提示符样式？${C_RESET}（y/n，回车=y）： "
-      read -r starship_ans </dev/tty
-      case "${starship_ans}" in
-        ""|Y|y|Yes|yes) sync_starship="true"; echo "   ${C_GREEN}✔ 已启用 starship 同步${C_RESET}"; break ;;
-        N|n|No|no)      sync_starship="false"; echo "   ${C_GREEN}✔ 关闭 starship 同步${C_RESET}"; break ;;
-        *) echo "   ${C_RED}✗ 请输入 y 或 n（或直接回车用默认 y）。${C_RESET}" ;;
-      esac
-    done
-    echo ""
-
-    # ⑤ SSH 配置
-    # 智能默认：本机已有 age 私钥→默认 y；没有→默认 n（避免用户装到一半才发现解不了密）。
-    # 全部变量单行 local 声明,避免 bash 3.2 与 set -u 的边角行为。
-    local ssh_ans=""
-    local sync_ssh="true"
-    local ssh_default="y"
-    if [ ! -f "$HOME/.config/chezmoi/key.txt" ]; then
-        ssh_default="n"
-    fi
-    while true; do
-      printf "${C_BOLD}⑤ 同步 SSH 配置？${C_RESET}（需要 age 私钥；y/n，回车=${ssh_default}）： "
-      read -r ssh_ans </dev/tty
-      if [ -z "$ssh_ans" ]; then ssh_ans="${ssh_default}"; fi
-      case "$ssh_ans" in
-        Y|y|Yes|yes) sync_ssh="true"; echo "   ${C_GREEN}✔ 已启用 SSH 同步${C_RESET}"; break ;;
-        N|n|No|no)   sync_ssh="false"; echo "   ${C_GREEN}✔ 关闭 SSH 同步${C_RESET}"; break ;;
-        *) echo "   ${C_RED}✗ 请输入 y 或 n。${C_RESET}" ;;
-      esac
-    done
-    echo ""
-
-    # 关键:用 --override-data-file 把 shell 答案传给 chezmoi,
-    # chezmoi 会用这些 key 覆盖 promptXxxOnce 的问询,一个都不再问用户。
-    # (--promptInt 等命令行 flag 只填充非 Once 版本,对 Once 函数无效——踩过的坑)
-    local override_file="$TMP_DIR/chezmoi-answers.json"
-    cat > "$override_file" <<EOF
+  # 写 override 文件给 chezmoi init 用。
+  # 关键:用 --override-data-file 而非 --promptInt(后者不填 Once 版本)。
+  CHEZMOI_OVERRIDE_FILE="$TMP_DIR/chezmoi-answers.json"
+  cat > "$CHEZMOI_OVERRIDE_FILE" <<EOF
 {
   "roleNum": $role_num,
   "name": "$git_name",
@@ -320,41 +312,63 @@ run_chezmoi() {
   "syncSshConfig": $sync_ssh
 }
 EOF
-  fi
+  ok "5 题已收集,准备应用。"
+}
 
+run_chezmoi_apply() {
+  local repo="https://github.com/${DOTFILES_SLUG}.git"
   log "拉取并应用私有 dotfiles：$repo"
-  # 冲突时自动用仓库版覆盖，不打断用户（个人手动改过 gitconfig 等会触发）
-  if [ -f "${override_file:-/nonexistent}" ]; then
+  # 冲突时自动用仓库版覆盖，不打断用户
+  if [ -n "${CHEZMOI_OVERRIDE_FILE:-}" ] && [ -f "$CHEZMOI_OVERRIDE_FILE" ]; then
     chezmoi init --apply --guess-repo-url=false --force \
-      --override-data-file "$override_file" "$repo"
+      --override-data-file "$CHEZMOI_OVERRIDE_FILE" "$repo"
   else
     chezmoi init --apply --guess-repo-url=false --force "$repo"
   fi
 }
 
 ensure_software() {
-  # 关键：chezmoi 的 run_once 脚本(装软件的 90)只按内容跑一次——
-  # 若首次装机中途卡住/中断，重跑 bootstrap 时 chezmoi 会认为"已跑过"而跳过，
-  # 导致软件没装全却显示完成。这里由 bootstrap 主动再跑一次装软件脚本。
+  # 兜底续跑：只在检测到"上次装机没跑完"时才补跑,避免与 chezmoi apply 内触发的 90 重复输出。
+  #
+  # 判据(从强到弱):
+  #   ① ~/.local/state/dotfiles-install-logs/last_failed.Brewfile 存在且非空
+  #      → 上次有失败,补跑
+  #   ② 没有装机日志文件(说明 chezmoi run_once 跳过了 90,当前是重跑 bootstrap)
+  #      → 补跑
+  #   ③ 有日志但很小(<50 行,说明中途崩掉)
+  #      → 补跑
+  # 其它情况(chezmoi apply 刚刚跑完 90,没失败,日志正常) → 跳过兜底,不重复。
   local src="${HOME}/.local/share/chezmoi"
+  local log_dir="$HOME/.local/state/dotfiles-install-logs"
+  local retry_file="$log_dir/last_failed.Brewfile"
+  local need_run=""
+  local latest_log=""
 
-  # 先把本机 dotfiles source 强制更新到 GitHub 最新，
-  # 避免跑到本机残留的旧版装软件脚本（旧版无进度、无 GitHub 加速）。
-  # 安全保护：source 是软链（如开发机指向云盘工作仓）或有未提交改动时不动它，
-  # 只对"纯 clone 的新机 source"做强制同步。
+  if [ -s "$retry_file" ]; then
+    need_run="1"; log "检测到上次有失败项 → 补跑装软件..."
+  elif [ ! -d "$log_dir" ] || [ -z "$(ls -1 "$log_dir"/brew_bundle_*.log 2>/dev/null)" ]; then
+    need_run="1"; log "未检测到装软件日志 → 主动跑一次装软件..."
+  else
+    latest_log="$(ls -1t "$log_dir"/brew_bundle_*.log 2>/dev/null | head -1)"
+    if [ -n "$latest_log" ] && [ "$(wc -l < "$latest_log" 2>/dev/null)" -lt 50 ]; then
+      need_run="1"; log "上次装软件日志异常短(疑似中断) → 补跑..."
+    fi
+  fi
+
+  if [ -z "$need_run" ]; then
+    ok "本轮 chezmoi apply 已完成装软件,无需再跑。"
+    return
+  fi
+
+  # 走到这里 = 真需要补跑。先强同步最新脚本(处理"卡死重跑走旧脚本"场景)。
   if [ -d "$src/.git" ] && [ ! -L "$src" ]; then
     if [ -z "$(git -C "$src" status --porcelain 2>/dev/null)" ]; then
       log "更新本机 dotfiles 到最新版本..."
-      # 策略 A：整仓 git fetch（多加速站兜底）——最完整，但 git 端点常被墙。
-      # 国内直连 github.com 常年不稳,若只走 origin 会 fallback 到旧版脚本,
-      # 导致 90(装软件) 走的还是"无进度无超时"的老代码 → 用户看到卡死。
       local base_url="https://github.com/${DOTFILES_SLUG}.git"
       local orig_remote; orig_remote="$(git -C "$src" remote get-url origin 2>/dev/null || echo "$base_url")"
-      # GIT_TERMINAL_PROMPT=0：绝不弹用户名/密码交互，避免卡在凭证输入。
       local fetched=""
       for accel_prefix in "" "https://gh-proxy.com/" "https://ghproxy.net/" "https://github.akams.cn/"; do
         local try_url="${accel_prefix}${base_url}"
-        # 裸连时用 origin 原 URL(可能已带凭证)，加速时临时切
         if [ -n "$accel_prefix" ]; then
           git -C "$src" remote set-url origin "$try_url" 2>/dev/null || continue
           log "尝试通过加速站更新: ${accel_prefix%/}"
@@ -369,7 +383,6 @@ ensure_software() {
           break
         fi
       done
-      # 无论成败,把 origin 还原为原始 URL(避免污染)
       git -C "$src" remote set-url origin "$orig_remote" 2>/dev/null || true
 
       if [ -n "$fetched" ]; then
@@ -377,10 +390,6 @@ ensure_software() {
           && ok "已更新到最新脚本。" \
           || warn "无法重置到最新，将用本机现有版本继续。"
       else
-        # 策略 B（降级）：git 端点全挂，但 bootstrap.sh 自己是从 raw 拉下来的
-        # → 说明 raw.githubusercontent.com 通。直接从 raw 下载 90 脚本覆盖本地文件，
-        # 只更新装软件脚本这一个关键文件，绕开 git 协议端点被墙的问题。
-        # 私有仓 raw 需要 Bearer token；从当前进程环境变量取(vault 解密后未被 unset)。
         warn "git fetch 全部失败，改用 raw 直下核心脚本..."
         local curl_auth=()
         if [ -n "${GITHUB_TOKEN:-}" ]; then
@@ -391,7 +400,6 @@ ensure_software() {
           "https://raw.gitmirror.com/${DOTFILES_SLUG}/main"
           "https://raw.githubusercontent.com/${DOTFILES_SLUG}/main"
         )
-        # 只补下最关键的 90 脚本(装软件)。其他脚本要么早就跑过、要么本机版够用。
         local target_file="run_once_after_90_install_brew_bundle.sh"
         local raw_ok=""
         for raw_base in "${raw_bases[@]}"; do
@@ -429,6 +437,9 @@ ensure_software() {
 }
 
 main() {
+  # P2: preflight_admin 前置到 banner 之前——不满足条件的用户不看 banner,直接告诉他改权限
+  preflight_admin
+
   hr
   title "🚀 Mac 一行装机 · vault 版 · 6 幕全流程"
   hr
@@ -440,16 +451,15 @@ main() {
   echo "  幕 3 · 5 题选项       — 机器角色/Git 身份/starship/SSH 同步"
   echo "                          shell 交互，答完立刻回显 ✔"
   echo "  幕 4 · 系统设置       — 触控板/听写/电源策略（按角色分化）"
-  echo "  幕 5 · 生成软件清单   — 按角色推荐清单（默认 headless；WIZARD=1 弹浏览器）"
-  echo "  幕 6 · 批量装软件     — 40+ 软件，${C_BOLD}约 30-60 分钟${C_RESET}，逐条进度+心跳+超时"
+  echo "  幕 5 · 生成软件清单   — 按角色推荐清单（默认自动；WIZARD=1 弹浏览器）"
+  echo "  幕 6 · 批量装软件     — 40+ 软件，${C_BOLD}约 25-45 分钟${C_RESET}，逐条进度+心跳+超时"
   echo ""
   echo "${C_DIM}💡 装机进行时的使用指南（收藏本条）：${C_RESET}"
-  echo "${C_DIM}   ✔ 现在可以：切窗口做别的、让电脑合盖休眠（brew 会自动暂停恢复）${C_RESET}"
-  echo "${C_DIM}   ✘ 现在不要：断网 / 关机 / 强制重启${C_RESET}"
+  echo "${C_DIM}   ✔ 可以：切窗口做别的、让电脑合盖休眠（brew 会自动暂停恢复）${C_RESET}"
+  echo "${C_DIM}   ✘ 不要：断网 / 关机 / 强制重启${C_RESET}"
   echo "${C_DIM}   💾 想中断：Ctrl+C 随时安全退出，重贴同一行命令自动续跑（已完成步骤秒过）${C_RESET}"
   echo "${C_DIM}   📄 全程日志：~/.local/state/dotfiles-install-logs/brew_bundle_*.log${C_RESET}"
   hr
-  preflight_admin
 
   # ─── 幕 1：装地基（先拿一次 sudo，全程 keepalive）──────────────
   act 1 "装地基（CLT + Homebrew + 核心工具）"
@@ -465,18 +475,110 @@ main() {
   install_github_token
 
   # ─── 幕 3：5 题选择 + 拉取仓库 ──────────────────────────────
-  # 5 题由 shell 前置问答，答完注入 chezmoi。chezmoi apply 会串行触发:
-  #   幕 4 (10 脚本 系统设置) → 幕 5 (80 脚本 生成清单) → 幕 6 (90 脚本 装软件) → 95 收尾
-  # 每个子脚本自己不喊大标题，由 bootstrap 打幕头统一叙事。
-  act 3 "5 题选择 + 拉取 dotfiles 仓库"
-  run_chezmoi
+  act 3 "回答 5 道选择题（1 分钟）"
+  run_chezmoi_prompts_only
 
-  # ─── 幕 6 兜底：主动重跑 90（处理 chezmoi run_once 跳过场景）──
-  act 6 "批量装软件（幂等续跑保险丝）"
-  echo "${C_DIM}提示：chezmoi 的 run_once 只按内容跑一次，中途卡死重跑时会跳过 90，${C_RESET}"
-  echo "${C_DIM}      所以这里由 bootstrap 主动再跑一次装软件脚本，确保软件真装齐。${C_RESET}"
+  # ─── 幕 4/5/6：chezmoi apply 会串行触发 10 → 80 → 90 → 95 ────
+  # 提前告诉用户接下来会看到什么,避免"突然一堆子脚本冒出来"的懵。
+  act 4 "注入系统设置（触控板/听写/电源/分辨率）"
+  echo "${C_DIM}由 chezmoi apply 自动触发 run_once_after_10。约 5 秒。${C_RESET}"
+
+  act 5 "生成软件清单（按角色推荐，无需操作）"
+  echo "${C_DIM}由 chezmoi apply 自动触发 run_once_after_80。约 3 秒。${C_RESET}"
+
+  act 6 "批量装软件（40+ 项 · ${C_BOLD}25-45 分钟${C_RESET}${C_DIM}）"
+  echo "由 chezmoi apply 自动触发 run_once_after_90 → run_once_after_95。${C_RESET}"
+
+  run_chezmoi_apply
+
+  # ─── 兜底续跑（智能判断,不重复输出）───
+  # 只在 chezmoi apply 因为 run_once 缓存跳过 90、或上次有失败项时才补跑。
+  # 正常首次装机走完就 return,不会重复输出装软件进度。
   ensure_software
 
+  # ─── 收尾展示 ───────────────────────────────────────────
+  show_completion_banner
+}
+
+# P3: 子命令入口——细粒度操作,不必每次跑完整 6 幕
+show_help() {
+  cat <<EOF
+用法: bash bootstrap.sh [子命令]
+
+子命令:
+  (无参数)         完整 6 幕装机流程（首次装机必走这条）
+  retry            只重跑上次失败的软件（读取 ~/.local/state/dotfiles-install-logs/last_failed.Brewfile）
+  reset            清 chezmoi 缓存 + 重问 5 题（换角色/换 Git 身份时用）
+  apply            只跑 chezmoi apply（配置改动后同步）
+  install          只跑装软件的 90 脚本（清单已生成时用）
+  wizard           启动图形向导让你手动勾选软件（等同 WIZARD=1 apply）
+  help, --help     打印本帮助
+
+例子:
+  # 首次装机
+  bash -c "\$(curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/Zpwww/dotfiles-bootstrap/main/bootstrap.sh)"
+
+  # 只补装失败的软件
+  curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/Zpwww/dotfiles-bootstrap/main/bootstrap.sh | bash -s retry
+EOF
+}
+
+cmd_retry() {
+  hr
+  title "🔁 只重试上次失败的软件"
+  hr
+  local retry_file="$HOME/.local/state/dotfiles-install-logs/last_failed.Brewfile"
+  if [ ! -s "$retry_file" ]; then
+    ok "没有需要重试的软件（上次装机全成功或未装过）。"
+    return
+  fi
+  local count; count=$(grep -cE '^(cask|brew|mas) ' "$retry_file" 2>/dev/null || echo 0)
+  echo "上次失败的 $count 个软件:"
+  cat "$retry_file"
+  echo ""
+  HOMEBREW_ARTIFACT_DOMAIN=https://gh-proxy.com brew bundle --file="$retry_file" \
+    && ok "重试完成。" \
+    || warn "仍有失败,查看日志: ~/.local/state/dotfiles-install-logs/"
+}
+
+cmd_reset() {
+  hr
+  title "🔄 重置 chezmoi 配置(下次会重问 5 题)"
+  hr
+  local toml="$HOME/.config/chezmoi/chezmoi.toml"
+  if [ -f "$toml" ]; then
+    mv "$toml" "${toml}.bak.$(date +%Y%m%d_%H%M%S)"
+    ok "已备份并清除 $toml，下次运行会重新问 5 题。"
+  else
+    warn "$toml 不存在,无需清理。"
+  fi
+}
+
+cmd_apply() {
+  hr
+  title "⚙️ 只跑 chezmoi apply（同步配置改动）"
+  hr
+  chezmoi apply --force
+  ok "chezmoi apply 完成。"
+}
+
+cmd_install() {
+  hr
+  title "📦 只跑装软件的 90 脚本"
+  hr
+  local sw="${HOME}/.local/share/chezmoi/run_once_after_90_install_brew_bundle.sh"
+  [ -f "$sw" ] || { err "找不到 90 脚本 $sw,请先跑完整 bootstrap"; exit 1; }
+  bash "$sw"
+}
+
+cmd_wizard() {
+  hr
+  title "🖱️ 启动图形向导手动勾选软件"
+  hr
+  WIZARD=1 chezmoi apply --force
+}
+
+show_completion_banner() {
   echo ""
   hr
   title "🎉 六幕演出完成！Mac 已从裸机变成你的顶级工作站。"
@@ -504,15 +606,25 @@ main() {
   echo ""
   if [ -s "$HOME/.local/state/dotfiles-install-logs/last_failed.Brewfile" ]; then
     echo "${C_YELLOW}⚠️ 本次有软件未装成功，一键重试：${C_RESET}"
-    echo "     HOMEBREW_ARTIFACT_DOMAIN=https://gh-proxy.com brew bundle \\"
-    echo "       --file=~/.local/state/dotfiles-install-logs/last_failed.Brewfile"
+    echo "     curl -fsSL https://gh-proxy.com/https://raw.githubusercontent.com/${DOTFILES_SLUG%/*}/dotfiles-bootstrap/main/bootstrap.sh | bash -s retry"
+    echo "     或直接: HOMEBREW_ARTIFACT_DOMAIN=https://gh-proxy.com brew bundle --file=~/.local/state/dotfiles-install-logs/last_failed.Brewfile"
     echo ""
   fi
-  echo "${C_DIM}如仍有软件需补齐，直接重跑本命令（已装的秒判跳过）。${C_RESET}"
+  echo "${C_DIM}其他子命令: reset(重问 5 题) / apply(同步配置) / install(只装软件) / wizard(图形勾选) / help${C_RESET}"
   hr
 
   # 收尾：结束 sudo keepalive
   [ -n "${SUDO_KEEPALIVE_PID:-}" ] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
 }
 
-main "$@"
+# 入口分发
+case "${1:-}" in
+  help|-h|--help) show_help ;;
+  retry)          cmd_retry ;;
+  reset)          cmd_reset ;;
+  apply)          cmd_apply ;;
+  install)        cmd_install ;;
+  wizard)         cmd_wizard ;;
+  ""|main)        main ;;
+  *)              echo "未知子命令: $1"; show_help; exit 1 ;;
+esac
