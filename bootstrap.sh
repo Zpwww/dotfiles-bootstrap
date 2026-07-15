@@ -358,7 +358,34 @@ EOF
 
 # ─── chezmoi 应用 ──────────────────────────────────────────────────────
 apply_dotfiles() {
-    info "拉取并应用 dotfiles (chezmoi)..."
+    local src="$HOME/.local/share/chezmoi"
+    # 关键: chezmoi 已 clone 过时,先强制拉最新(避免本机残留旧版子脚本)。
+    # 多加速站兜底,网络不通就用本机版继续(不阻塞主流程)。
+    if [ -d "$src/.git" ] && [ ! -L "$src" ]; then
+        info "更新 dotfiles 源码到 GitHub 最新..."
+        local base_url="https://github.com/${DOTFILES_SLUG}.git"
+        local orig_remote; orig_remote="$(git -C "$src" remote get-url origin 2>/dev/null || echo "$base_url")"
+        local fetched=""
+        for accel in "" "https://gh-proxy.com/" "https://ghproxy.net/" "https://github.akams.cn/"; do
+            if [ -n "$accel" ]; then
+                git -C "$src" remote set-url origin "${accel}${base_url}" 2>/dev/null || continue
+            fi
+            if GIT_TERMINAL_PROMPT=0 git -C "$src" \
+                 -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=15 \
+                 fetch origin main >/dev/null 2>&1; then
+                fetched=1
+                break
+            fi
+        done
+        git -C "$src" remote set-url origin "$orig_remote" 2>/dev/null || true
+        if [ -n "$fetched" ]; then
+            git -C "$src" reset --hard FETCH_HEAD >/dev/null 2>&1 && ok "源码已更新" || warn "源码重置失败,用本机版继续"
+        else
+            warn "源码更新失败(网络不通),用本机版继续"
+        fi
+    fi
+
+    info "应用 dotfiles..."
     ensure chezmoi init --apply --guess-repo-url=false --force \
         "https://github.com/${DOTFILES_SLUG}.git"
     ok "dotfiles 已应用"
@@ -375,24 +402,20 @@ run_local_hook() {
     fi
 }
 
-# ─── 收尾 ──────────────────────────────────────────────────────────────
+# ─── 收尾 (MECE: 只讲状态和 next-step 入口,详情全指向 装机待办.md) ────
 show_finish() {
     local todo="$HOME/装机待办.md"
-    echo ""
-    ok "装机主流程完成"
-    echo ""
-    info "下一步 (详见 $todo):"
-    hint "  1. 重启电脑,让触控板/听写/电源策略等生效"
-    hint "  2. 启动 WeType,系统设置→键盘→输入法→添加微信输入法"
-    hint "     · WeType 偏好: 中英切换键=Shift, Caps Lock=直接大写, 开机启动"
-    hint "  3. 系统设置→隐私与安全性→辅助功能:勾选 Raycast、Loop"
-    hint "  4. 接通外网后,双击桌面「补装海外软件.command」补 Chrome/Claude 等"
     local retry="$HOME/.local/state/dotfiles-install-logs/last_failed.Brewfile"
+
+    echo ""
     if [ -s "$retry" ]; then
-        echo ""
-        warn "有部分软件未装成功,重试:"
-        hint "  bash bootstrap.sh retry"
+        local n; n=$(wc -l < "$retry" | tr -d ' ')
+        warn "装机完成,但 $n 个软件未装成功"
+        hint "  重试: bash bootstrap.sh retry"
+    else
+        ok "装机完成 ✨"
     fi
+    hint "  待办清单: $todo (桌面也有一份副本,双击查看)"
     echo ""
 }
 
