@@ -19,7 +19,7 @@
 set -eu
 
 # ─── 常量 ───────────────────────────────────────────────────────────────
-DOTFILES_SLUG="${DOTFILES_SLUG:-Zpwww/dotfiles-bootstrap}"
+DOTFILES_SLUG="${DOTFILES_SLUG:-Zpwww/dotfiles}"
 GITHUB_USERNAME="${GITHUB_USERNAME:-Zpwww}"
 BOOTSTRAP_RAW_BASE="${BOOTSTRAP_RAW_BASE:-https://raw.githubusercontent.com/Zpwww/dotfiles-bootstrap/main}"
 VAULT_URL="${VAULT_URL:-https://gh-proxy.com/${BOOTSTRAP_RAW_BASE}/bootstrap.vault.age}"
@@ -234,9 +234,6 @@ decrypt_vault() {
     done
 
     set -a; . "$env_file"; set +a
-    # vault 里可能残留旧值(Zpwww/dotfiles) → 强制覆盖为正确的 dotfiles-bootstrap
-    # 不删是为了向后兼容旧 vault,但 dotfiles repo 名以 bootstrap.sh 硬编码为准
-    DOTFILES_SLUG="Zpwww/dotfiles-bootstrap"
     ok "vault 已解密"
 }
 
@@ -363,38 +360,57 @@ EOF
 # fetch_source: 用 curl 拉 tarball 走 raw 加速站 (git clone 加速站基本都挂,
 # 但 gh-proxy.com 对 raw 文件工作良好,你 bootstrap.sh 就是这么下下来的)
 # tarball 展开后不是 git repo,但 chezmoi 不要求 source 必须是 git repo。
+# fetch_source: 用 curl 拉 tarball
+# - 私有 repo 需要 GITHUB_TOKEN (从 vault 解密后已 export)
+# - 加速站(gh-proxy.com 等)对公开 raw 稳定,但 **不代理 Authorization 头**,
+#   所以私有 repo 的 archive 端点只能走 GitHub 直连 + token
+# - tarball 展开后不是 git repo,但 chezmoi 不要求 source 必须是 git repo
 fetch_source() {
     local dst="$1"
-    # 用 github.com/archive 端点 (gh-proxy 已验证支持)
-    local tar_path="https://github.com/${DOTFILES_SLUG}/archive/refs/heads/main.tar.gz"
+    local tar_url="https://github.com/${DOTFILES_SLUG}/archive/refs/heads/main.tar.gz"
 
-    # 加速站清单: 对 raw 文件而言,gh-proxy.com 稳定工作
-    for accel in "https://gh-proxy.com/" "https://ghfast.top/" "https://ghproxy.net/" ""; do
-        local try_url="${accel}${tar_path}"
-        if [ -n "$accel" ]; then
-            info "下载 tarball via ${accel%/} ..."
-        else
-            info "下载 tarball via GitHub 直连 ..."
-        fi
+    # 私有 repo: 只能 GitHub 直连,加带 token 的 Authorization
+    # 公有 repo (GITHUB_TOKEN 为空): 走加速站
+    urls=()
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        info "私有 repo 检测到 token,直连 GitHub..."
+        urls=("$tar_url")
+    else
+        for accel in "https://gh-proxy.com/" "https://ghfast.top/" "https://ghproxy.net/" ""; do
+            urls+=("${accel}${tar_url}")
+        done
+    fi
 
+    for try_url in "${urls[@]}"; do
+        info "下载 tarball: $(echo "$try_url" | sed 's|https://||;s|/.*||') ..."
         local tmp_tar
         tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
-        if curl -fsSL --connect-timeout 10 --speed-limit 20480 --speed-time 15 \
-                 -o "$tmp_tar" "$try_url"; then
-            # 校验: tarball 不能是空文件或 HTML 错误页
-            if [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
-                rm -rf "$dst" 2>/dev/null
-                mkdir -p "$dst"
-                # tarball 顶层是 <repo>-main/, 用 --strip-components=1 剥掉
-                if tar -xzf "$tmp_tar" -C "$dst" --strip-components=1; then
-                    rm -f "$tmp_tar"
-                    ok "源码已获取 via ${accel:-直连}"
-                    return 0
-                fi
+
+        # 私有 repo 需要 Authorization 头 (GitHub token)
+        # 用 -H 附加, curl 会正确处理; token 不出现在命令行 ps 里
+        local rc=0
+        if [ -n "${GITHUB_TOKEN:-}" ]; then
+            curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
+                 -H "Authorization: Bearer $GITHUB_TOKEN" \
+                 -H "Accept: application/vnd.github+json" \
+                 -o "$tmp_tar" "$try_url" || rc=$?
+        else
+            curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
+                 -o "$tmp_tar" "$try_url" || rc=$?
+        fi
+
+        if [ "$rc" -eq 0 ] && [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
+            rm -rf "$dst" 2>/dev/null
+            mkdir -p "$dst"
+            if tar -xzf "$tmp_tar" -C "$dst" --strip-components=1; then
+                rm -f "$tmp_tar"
+                local size; size=$(du -sh "$dst" 2>/dev/null | awk '{print $1}')
+                ok "源码已获取 (${size:-?})"
+                return 0
             fi
         fi
         rm -f "$tmp_tar"
-        warn "此加速站失败,换下一个"
+        warn "此源失败,换下一个"
     done
     return 1
 }
