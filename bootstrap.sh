@@ -404,7 +404,7 @@ run_local_hook() {
 
 # ─── 收尾 (MECE: 只讲状态和 next-step 入口,详情全指向 装机待办.md) ────
 show_finish() {
-    local todo="$HOME/装机待办.md"
+    local todo="$HOME/Desktop/装机待办.md"
     local retry="$HOME/.local/state/dotfiles-install-logs/last_failed.Brewfile"
 
     echo ""
@@ -415,7 +415,7 @@ show_finish() {
     else
         ok "装机完成 ✨"
     fi
-    hint "  待办清单: $todo (桌面也有一份副本,双击查看)"
+    hint "  待办清单: $todo (桌面上,双击查看)"
     echo ""
 }
 
