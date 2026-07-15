@@ -227,7 +227,7 @@ run_chezmoi() {
   # 幂等：如果 ~/.config/chezmoi/chezmoi.toml 已存在,说明角色等已缓存过,
   # 跳过所有问题,直接 chezmoi init --apply 用已有配置继续。
   local toml="$HOME/.config/chezmoi/chezmoi.toml"
-  local prompt_args=()
+  local override_file=""
   if [ -f "$toml" ] && grep -q '^role' "$toml" 2>/dev/null; then
     ok "检测到已有 chezmoi 配置，跳过选择题，直接应用。"
   else
@@ -307,19 +307,29 @@ run_chezmoi() {
     done
     echo ""
 
-    # 用 --promptInt/--promptString/--promptBool 把 shell 答案精确注入模板
-    prompt_args=(
-      --promptInt "roleNum=$role_num"
-      --promptString "name=$git_name"
-      --promptString "email=$git_email"
-      --promptBool "syncStarship=$sync_starship"
-      --promptBool "syncSshConfig=$sync_ssh"
-    )
+    # 关键:用 --override-data-file 把 shell 答案传给 chezmoi,
+    # chezmoi 会用这些 key 覆盖 promptXxxOnce 的问询,一个都不再问用户。
+    # (--promptInt 等命令行 flag 只填充非 Once 版本,对 Once 函数无效——踩过的坑)
+    local override_file="$TMP_DIR/chezmoi-answers.json"
+    cat > "$override_file" <<EOF
+{
+  "roleNum": $role_num,
+  "name": "$git_name",
+  "email": "$git_email",
+  "syncStarship": $sync_starship,
+  "syncSshConfig": $sync_ssh
+}
+EOF
   fi
 
   log "拉取并应用私有 dotfiles：$repo"
   # 冲突时自动用仓库版覆盖，不打断用户（个人手动改过 gitconfig 等会触发）
-  chezmoi init --apply --guess-repo-url=false --force "${prompt_args[@]}" "$repo"
+  if [ -f "${override_file:-/nonexistent}" ]; then
+    chezmoi init --apply --guess-repo-url=false --force \
+      --override-data-file "$override_file" "$repo"
+  else
+    chezmoi init --apply --guess-repo-url=false --force "$repo"
+  fi
 }
 
 ensure_software() {
