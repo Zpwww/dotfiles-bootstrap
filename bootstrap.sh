@@ -19,7 +19,7 @@
 set -eu
 
 # ─── 常量 ───────────────────────────────────────────────────────────────
-DOTFILES_SLUG="${DOTFILES_SLUG:-Zpwww/dotfiles}"
+DOTFILES_SLUG="${DOTFILES_SLUG:-Zpwww/dotfiles-bootstrap}"
 GITHUB_USERNAME="${GITHUB_USERNAME:-Zpwww}"
 BOOTSTRAP_RAW_BASE="${BOOTSTRAP_RAW_BASE:-https://raw.githubusercontent.com/Zpwww/dotfiles-bootstrap/main}"
 VAULT_URL="${VAULT_URL:-https://gh-proxy.com/${BOOTSTRAP_RAW_BASE}/bootstrap.vault.age}"
@@ -43,7 +43,7 @@ fi
 
 info()  { printf '%s>%s %s\n' "$C_BLUE"   "$C_RESET" "$*"; }
 warn()  { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
-error() { printf '%sx%s %s\n' "$C_RED"    "$C_RESET" "$*" >&2; }
+error() { printf '%sx%s %s\n' "$C_RED"    "$C_RESET" "$*" >&2; exit 1; }
 ok()    { printf '%s✓%s %s\n' "$C_GREEN"  "$C_RESET" "$*"; }
 hint()  { printf '%s  %s%s\n' "$C_DIM"    "$*"       "$C_RESET"; }
 
@@ -357,34 +357,41 @@ EOF
 }
 
 # ─── chezmoi 应用 ──────────────────────────────────────────────────────
-# clone_with_fallback: 依次试多个加速站真实 clone(不是握手探测)
-# 每个加速站都带低速熔断(20KB/s 持续 15s 就切下一个),彻底避免 GFW 中间断流干挂。
-# 注意: 用 clone 后判断 .git 目录是否真实存在,不能依赖 pipeline 退出码。
-clone_with_fallback() {
+# fetch_source: 用 curl 拉 tarball 走 raw 加速站 (git clone 加速站基本都挂,
+# 但 gh-proxy.com 对 raw 文件工作良好,你 bootstrap.sh 就是这么下下来的)
+# tarball 展开后不是 git repo,但 chezmoi 不要求 source 必须是 git repo。
+fetch_source() {
     local dst="$1"
-    local base_url="https://github.com/${DOTFILES_SLUG}.git"
+    # 用 github.com/archive 端点 (gh-proxy 已验证支持)
+    local tar_path="https://github.com/${DOTFILES_SLUG}/archive/refs/heads/main.tar.gz"
 
-    # 加速站清单(按国内常见可用度排序,gh-proxy.com 对 git 协议返 HTML 已剔除)
-    for accel in "https://ghfast.top/" "https://ghproxy.net/" "https://github.akams.cn/" "https://mirror.ghproxy.com/" ""; do
-        local try_url="${accel}${base_url}"
-        rm -rf "$dst" 2>/dev/null
+    # 加速站清单: 对 raw 文件而言,gh-proxy.com 稳定工作
+    for accel in "https://gh-proxy.com/" "https://ghfast.top/" "https://ghproxy.net/" ""; do
+        local try_url="${accel}${tar_path}"
         if [ -n "$accel" ]; then
-            info "clone via ${accel%/} ..."
+            info "下载 tarball via ${accel%/} ..."
         else
-            info "clone via GitHub 直连 ..."
+            info "下载 tarball via GitHub 直连 ..."
         fi
-        # 直接 clone, 不 pipe (pipeline 会掩盖真实退出码)
-        if GIT_TERMINAL_PROMPT=0 git \
-             -c http.lowSpeedLimit=20480 -c http.lowSpeedTime=15 \
-             clone --depth=1 "$try_url" "$dst" 2>&1; then
-            # 二次校验: .git 目录真的存在, 才算成功
-            if [ -d "$dst/.git" ]; then
-                ok "clone 成功 via ${accel:-直连}"
-                return 0
+
+        local tmp_tar
+        tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
+        if curl -fsSL --connect-timeout 10 --speed-limit 20480 --speed-time 15 \
+                 -o "$tmp_tar" "$try_url"; then
+            # 校验: tarball 不能是空文件或 HTML 错误页
+            if [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
+                rm -rf "$dst" 2>/dev/null
+                mkdir -p "$dst"
+                # tarball 顶层是 <repo>-main/, 用 --strip-components=1 剥掉
+                if tar -xzf "$tmp_tar" -C "$dst" --strip-components=1; then
+                    rm -f "$tmp_tar"
+                    ok "源码已获取 via ${accel:-直连}"
+                    return 0
+                fi
             fi
         fi
+        rm -f "$tmp_tar"
         warn "此加速站失败,换下一个"
-        rm -rf "$dst" 2>/dev/null
     done
     return 1
 }
@@ -392,40 +399,16 @@ clone_with_fallback() {
 apply_dotfiles() {
     local src="$HOME/.local/share/chezmoi"
 
-    # 情况 A: 已 clone 过 → 用同样的加速链兜底 fetch
-    if [ -d "$src/.git" ] && [ ! -L "$src" ]; then
-        info "更新 dotfiles 源码..."
-        local base_url="https://github.com/${DOTFILES_SLUG}.git"
-        local orig_remote; orig_remote="$(git -C "$src" remote get-url origin 2>/dev/null || echo "$base_url")"
-        local ok_flag=""
-        for accel in "https://ghfast.top/" "https://ghproxy.net/" "https://github.akams.cn/" "https://mirror.ghproxy.com/" ""; do
-            git -C "$src" remote set-url origin "${accel}${base_url}" 2>/dev/null || true
-            if GIT_TERMINAL_PROMPT=0 git -C "$src" \
-                 -c http.lowSpeedLimit=20480 -c http.lowSpeedTime=15 \
-                 fetch origin main >/dev/null 2>&1; then
-                ok_flag=1
-                break
-            fi
-        done
-        if [ -n "$ok_flag" ]; then
-            git -C "$src" reset --hard FETCH_HEAD >/dev/null 2>&1 && ok "源码已更新" \
-                || warn "源码重置失败,用本机版继续"
-        else
-            warn "源码更新失败(所有加速站+直连都超时),用本机版继续"
-        fi
-        git -C "$src" remote set-url origin "$orig_remote" 2>/dev/null || true
-        info "应用 dotfiles..."
-        ensure chezmoi apply --force
-    else
-        # 情况 B: 首次 clone → 我们自己 clone,不让 chezmoi 内部起子进程
-        info "首次 clone dotfiles..."
-        clone_with_fallback "$src" || {
-            error "所有加速站+直连全部失败,请换个网络重试"
-        }
-        # chezmoi init 用本地路径,不走网络
-        ensure chezmoi init --apply --guess-repo-url=false --force --source="$src"
+    # 每次装机都用 curl 拉最新 tarball 覆盖 (可靠 + 幂等)
+    # 好处: 不需要区分"首次 vs 已 clone", 也没有 git fetch/reset 的失败链路
+    info "获取 dotfiles 源码..."
+    if ! fetch_source "$src"; then
+        error "所有加速站+直连全部失败,请换个网络重试"
+        exit 1
     fi
 
+    info "应用 dotfiles..."
+    ensure chezmoi init --apply --guess-repo-url=false --force --source="$src"
     ok "dotfiles 已应用"
 }
 
