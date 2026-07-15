@@ -357,61 +357,88 @@ EOF
 }
 
 # ─── chezmoi 应用 ──────────────────────────────────────────────────────
-# fetch_source: 用 curl 拉 tarball 走 raw 加速站 (git clone 加速站基本都挂,
-# 但 gh-proxy.com 对 raw 文件工作良好,你 bootstrap.sh 就是这么下下来的)
-# tarball 展开后不是 git repo,但 chezmoi 不要求 source 必须是 git repo。
-# fetch_source: 用 curl 拉 tarball
-# - 私有 repo 需要 GITHUB_TOKEN (从 vault 解密后已 export)
-# - 加速站(gh-proxy.com 等)对公开 raw 稳定,但 **不代理 Authorization 头**,
-#   所以私有 repo 的 archive 端点只能走 GitHub 直连 + token
-# - tarball 展开后不是 git repo,但 chezmoi 不要求 source 必须是 git repo
+# fetch_source: 依次尝试 3 种获取方式,首个成功即返回。
+#   ① API tarball 端点 (api.github.com/repos/.../tarball) — 对 fine-grained
+#      token 支持最全, 走 302 重定向, curl -L 自动跟。
+#   ② archive 端点 (github.com/.../archive/refs/heads/main.tar.gz) — 部分
+#      fine-grained token 权限不匹配会 404, 兜底方案。
+#   ③ git clone HTTPS + token 嵌入 URL — 最原始的方式, chezmoi 也这么做。
 fetch_source() {
     local dst="$1"
-    local tar_url="https://github.com/${DOTFILES_SLUG}/archive/refs/heads/main.tar.gz"
+    local api_url="https://api.github.com/repos/${DOTFILES_SLUG}/tarball/main"
+    local archive_url="https://github.com/${DOTFILES_SLUG}/archive/refs/heads/main.tar.gz"
 
-    # 私有 repo: 只能 GitHub 直连,加带 token 的 Authorization
-    # 公有 repo (GITHUB_TOKEN 为空): 走加速站
-    urls=()
-    if [ -n "${GITHUB_TOKEN:-}" ]; then
-        info "私有 repo 检测到 token,直连 GitHub..."
-        urls=("$tar_url")
-    else
-        for accel in "https://gh-proxy.com/" "https://ghfast.top/" "https://ghproxy.net/" ""; do
-            urls+=("${accel}${tar_url}")
-        done
+    if [ -z "${GITHUB_TOKEN:-}" ]; then
+        warn "GITHUB_TOKEN 不存在,只能尝试公开仓路径"
     fi
 
-    for try_url in "${urls[@]}"; do
-        info "下载 tarball: $(echo "$try_url" | sed 's|https://||;s|/.*||') ..."
-        local tmp_tar
-        tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
-
-        # 私有 repo 需要 Authorization 头 (GitHub token)
-        # 用 -H 附加, curl 会正确处理; token 不出现在命令行 ps 里
-        local rc=0
-        if [ -n "${GITHUB_TOKEN:-}" ]; then
-            curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
-                 -H "Authorization: Bearer $GITHUB_TOKEN" \
-                 -H "Accept: application/vnd.github+json" \
-                 -o "$tmp_tar" "$try_url" || rc=$?
-        else
-            curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
-                 -o "$tmp_tar" "$try_url" || rc=$?
+    # ─── 方式 ①: API tarball (推荐,对 fine-grained token 最友好) ───
+    info "尝试 API tarball 端点..."
+    local tmp_tar; tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
+    local rc=0
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
+             -H "Authorization: Bearer $GITHUB_TOKEN" \
+             -H "Accept: application/vnd.github+json" \
+             -H "X-GitHub-Api-Version: 2022-11-28" \
+             -o "$tmp_tar" "$api_url" || rc=$?
+    else
+        curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
+             -o "$tmp_tar" "$api_url" || rc=$?
+    fi
+    if [ "$rc" -eq 0 ] && [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
+        rm -rf "$dst" 2>/dev/null; mkdir -p "$dst"
+        if tar -xzf "$tmp_tar" -C "$dst" --strip-components=1; then
+            rm -f "$tmp_tar"
+            local size; size=$(du -sh "$dst" 2>/dev/null | awk '{print $1}')
+            ok "源码已获取 via API tarball (${size:-?})"
+            return 0
         fi
+    fi
+    rm -f "$tmp_tar"
+    warn "API tarball 失败(rc=$rc),尝试 archive 端点..."
 
-        if [ "$rc" -eq 0 ] && [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
-            rm -rf "$dst" 2>/dev/null
-            mkdir -p "$dst"
-            if tar -xzf "$tmp_tar" -C "$dst" --strip-components=1; then
-                rm -f "$tmp_tar"
-                local size; size=$(du -sh "$dst" 2>/dev/null | awk '{print $1}')
-                ok "源码已获取 (${size:-?})"
-                return 0
-            fi
+    # ─── 方式 ②: archive 端点 ───
+    tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
+    rc=0
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
+             -H "Authorization: Bearer $GITHUB_TOKEN" \
+             -o "$tmp_tar" "$archive_url" || rc=$?
+    else
+        curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
+             -o "$tmp_tar" "$archive_url" || rc=$?
+    fi
+    if [ "$rc" -eq 0 ] && [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
+        rm -rf "$dst" 2>/dev/null; mkdir -p "$dst"
+        if tar -xzf "$tmp_tar" -C "$dst" --strip-components=1; then
+            rm -f "$tmp_tar"
+            local size; size=$(du -sh "$dst" 2>/dev/null | awk '{print $1}')
+            ok "源码已获取 via archive (${size:-?})"
+            return 0
         fi
-        rm -f "$tmp_tar"
-        warn "此源失败,换下一个"
-    done
+    fi
+    rm -f "$tmp_tar"
+    warn "archive 失败(rc=$rc),尝试 git clone..."
+
+    # ─── 方式 ③: git clone with token in URL ───
+    rm -rf "$dst" 2>/dev/null
+    local clone_url="https://github.com/${DOTFILES_SLUG}.git"
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+        clone_url="https://x-access-token:${GITHUB_TOKEN}@github.com/${DOTFILES_SLUG}.git"
+    fi
+    info "尝试 git clone..."
+    if GIT_TERMINAL_PROMPT=0 git \
+         -c http.lowSpeedLimit=20480 -c http.lowSpeedTime=30 \
+         clone --depth=1 "$clone_url" "$dst" 2>&1 | \
+         grep -vE '^(Cloning|remote:|Receiving|Resolving)' || [ -d "$dst/.git" ]; then
+        if [ -d "$dst/.git" ]; then
+            local size; size=$(du -sh "$dst" 2>/dev/null | awk '{print $1}')
+            ok "源码已获取 via git clone (${size:-?})"
+            return 0
+        fi
+    fi
+
     return 1
 }
 
