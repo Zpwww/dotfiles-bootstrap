@@ -469,6 +469,16 @@ apply_dotfiles() {
         exit 1
     fi
 
+    # 强制重置 run_once 状态 → 装软件/装插件/装配置脚本必重跑
+    # 目的: 用户"重跑 bootstrap = 一切自愈", 无需手动 brew install / chezmoi state delete。
+    # 场景: 上次装机中途中断 → brew 数据库半装状态 → 90 秒判"已装"跳过 → 用户永远装不上
+    # 重置后 90 会重扫每个 cask, is_installed 用 Artifacts 校验补齐漏装。
+    section "重置装机脚本状态 (确保'重跑=修复')"
+    if [ -f "$HOME/.config/chezmoi/chezmoistate.boltdb" ]; then
+        chezmoi state delete-bucket --bucket=scriptState >/dev/null 2>&1 || true
+        ok "run_once 状态已清空,装机脚本将全部重跑"
+    fi
+
     section "应用 dotfiles (触发装软件 + 个人偏好同步)"
     ensure chezmoi init --apply --guess-repo-url=false --force --source="$src"
 }
