@@ -391,17 +391,19 @@ fetch_source() {
     fi
 
     # ─── 方式 ①: API tarball (推荐,对 fine-grained token 最友好) ───
-    info "尝试 API tarball 端点..."
+    info "尝试 API tarball 端点 (60s 超时)..."
     local tmp_tar; tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
     local rc=0
+    # --max-time 60 是硬顶: 无论连不上/连上不返回/半速传/DNS 挂, 60s 必退
+    # -# 显示进度条, 让用户能看到是"在传"还是"卡死"
     if [ -n "${GITHUB_TOKEN:-}" ]; then
-        curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
+        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -# \
              -H "Authorization: Bearer $GITHUB_TOKEN" \
              -H "Accept: application/vnd.github+json" \
              -H "X-GitHub-Api-Version: 2022-11-28" \
              -o "$tmp_tar" "$api_url" || rc=$?
     else
-        curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
+        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -# \
              -o "$tmp_tar" "$api_url" || rc=$?
     fi
     if [ "$rc" -eq 0 ] && [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
@@ -417,14 +419,15 @@ fetch_source() {
     warn "API tarball 失败(rc=$rc),尝试 archive 端点..."
 
     # ─── 方式 ②: archive 端点 ───
+    info "尝试 archive 端点 (60s 超时)..."
     tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
     rc=0
     if [ -n "${GITHUB_TOKEN:-}" ]; then
-        curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
+        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -# \
              -H "Authorization: Bearer $GITHUB_TOKEN" \
              -o "$tmp_tar" "$archive_url" || rc=$?
     else
-        curl -fsSL --connect-timeout 15 --speed-limit 20480 --speed-time 20 \
+        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -# \
              -o "$tmp_tar" "$archive_url" || rc=$?
     fi
     if [ "$rc" -eq 0 ] && [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
