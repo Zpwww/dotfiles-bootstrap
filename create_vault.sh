@@ -54,9 +54,36 @@ if [[ -z "${GITHUB_TOKEN:-}" ]]; then
   exit 1
 fi
 
+# 尝试自动从本地 Tabby 配置文件读取 Token
+TABBY_TOKEN=""
+TABBY_CONFIG="$HOME/Library/Application Support/tabby/config.yaml"
+if [[ -f "$TABBY_CONFIG" ]]; then
+  TABBY_TOKEN="$(awk '/configSync:/ {flag=1; next} flag && /token:/ {print $2; exit} flag && !/^[[:space:]]/ {flag=0}' "$TABBY_CONFIG" | tr -d '"' | tr -d "'")"
+fi
+
+# 如果本地配置读不到，从 macOS Keychain 读取
+if [[ -z "$TABBY_TOKEN" ]]; then
+  if command -v security >/dev/null 2>&1; then
+    TABBY_TOKEN="$(security find-generic-password -a "$GITHUB_USERNAME" -s "tabby-gist-token" -w 2>/dev/null || true)"
+  fi
+fi
+
 echo ""
-printf "代理订阅 URL（可选，回车跳过）："
-read -r PROXY_SUBSCRIPTION_URL </dev/tty || PROXY_SUBSCRIPTION_URL=""
+if [[ -n "$TABBY_TOKEN" ]]; then
+  echo "读取 Tabby Gist 同步 Token："
+  echo "  -> 已自动读取到 Token (从本地配置或 macOS Keychain)"
+else
+  printf "Tabby Gist Token (可选，回车跳过): "
+  read -s -r TABBY_TOKEN </dev/tty
+  echo ""
+  if [[ -n "$TABBY_TOKEN" ]] && command -v security >/dev/null 2>&1; then
+    security add-generic-password -a "$GITHUB_USERNAME" -s "tabby-gist-token" -w "$TABBY_TOKEN" -U
+    echo "  -> Token 已安全存入 macOS Keychain，下次无需再输"
+  fi
+fi
+
+PROXY_CLASH_URL="${PROXY_CLASH_URL:-https://43.153.176.130:25521/clash/freedomcenter}"
+PROXY_SHADOWROCKET_URL="${PROXY_SHADOWROCKET_URL:-https://43.153.176.130:25521/helloworld/freedomcenter}"
 
 AGE_IDENTITY_B64="$(encode_b64 < "$AGE_KEY_PATH")"
 
@@ -66,10 +93,12 @@ DOTFILES_SLUG="$DOTFILES_SLUG"
 GITHUB_USERNAME="$GITHUB_USERNAME"
 GITHUB_TOKEN="$GITHUB_TOKEN"
 AGE_IDENTITY_B64="$AGE_IDENTITY_B64"
-PROXY_SUBSCRIPTION_URL="$PROXY_SUBSCRIPTION_URL"
+PROXY_CLASH_URL="$PROXY_CLASH_URL"
+PROXY_SHADOWROCKET_URL="$PROXY_SHADOWROCKET_URL"
+TABBY_TOKEN="$TABBY_TOKEN"
 EOF
 
-unset GITHUB_TOKEN AGE_IDENTITY_B64 PROXY_SUBSCRIPTION_URL
+unset GITHUB_TOKEN AGE_IDENTITY_B64 PROXY_CLASH_URL PROXY_SHADOWROCKET_URL TABBY_TOKEN
 
 echo ""
 echo "现在输入 vault 密码。"

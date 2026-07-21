@@ -362,6 +362,9 @@ email = "$git_email"
 syncStarship = $sync_starship
 syncSshConfig = $sync_ssh
 brewPrefix = "$brew_prefix"
+tabbyToken = "${TABBY_TOKEN:-}"
+proxyClashUrl = "${PROXY_CLASH_URL:-}"
+proxyShadowrocketUrl = "${PROXY_SHADOWROCKET_URL:-}"
 
 [data.roleFlags]
 isMobile = $is_mobile
