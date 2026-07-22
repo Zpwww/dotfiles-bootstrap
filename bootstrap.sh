@@ -290,7 +290,7 @@ collect_answers() {
         return
     fi
 
-    info "回答 5 个问题 (只问一次,答案存到 $toml)"
+    info "回答 7 个问题 (只问一次,答案存到 $toml)"
     echo ""
 
     ask_choice "① 机器角色?" "${ROLE_LABELS[@]}"
@@ -299,18 +299,32 @@ collect_answers() {
     ok "已选: ${ROLE_LABELS[$((role_num - 1))]}"
     echo ""
 
-    ask "② Git 用户名" "$GITHUB_USERNAME"
+    ask_choice "② 你想如何配置这台机器?" "完整装机(全新电脑)" "仅对齐配置(旧电脑)"
+    local install_mode="$REPLY"
+    [ "$install_mode" = "1" ] && ok "已选: 完整装机" || ok "已选: 仅对齐配置"
+    echo ""
+
+    local ioa_default="n"
+    [ "$role_str" = "work" ] && ioa_default="y"
+    local needs_intranet="false"
+    if confirm "③ 是否需要配置腾讯办公内网(iOA, WeTERM 等)?" "$ioa_default"; then
+        needs_intranet="true"
+    fi
+    ok "腾讯内网: $needs_intranet"
+    echo ""
+
+    ask "④ Git 用户名" "$GITHUB_USERNAME"
     local git_name="$REPLY"
     ok "已设: $git_name"
     echo ""
 
-    ask "③ Git 邮箱 (回车跳过)" ""
+    ask "⑤ Git 邮箱 (回车跳过)" ""
     local git_email="$REPLY"
     [ -z "$git_email" ] && ok "已跳过邮箱" || ok "已设: $git_email"
     echo ""
 
     local sync_starship="true"
-    if ! confirm "④ 同步 starship 终端样式?" "y"; then
+    if ! confirm "⑥ 同步 starship 终端样式?" "y"; then
         sync_starship="false"
     fi
     ok "starship 同步: $sync_starship"
@@ -319,18 +333,18 @@ collect_answers() {
     local ssh_default="n"
     [ -f "$HOME/.config/chezmoi/key.txt" ] && ssh_default="y"
     local sync_ssh="false"
-    if confirm "⑤ 同步 SSH 配置? (需 age 私钥)" "$ssh_default"; then
+    if confirm "⑦ 同步 SSH 配置? (需 age 私钥)" "$ssh_default"; then
         sync_ssh="true"
     fi
     ok "SSH 同步: $sync_ssh"
     echo ""
 
-    write_chezmoi_toml "$role_num" "$role_str" "$git_name" "$git_email" "$sync_starship" "$sync_ssh"
+    write_chezmoi_toml "$role_num" "$role_str" "$install_mode" "$needs_intranet" "$git_name" "$git_email" "$sync_starship" "$sync_ssh"
 }
 
 write_chezmoi_toml() {
-    local role_num="$1" role_str="$2" git_name="$3" git_email="$4"
-    local sync_starship="$5" sync_ssh="$6"
+    local role_num="$1" role_str="$2" install_mode="$3" needs_intranet="$4"
+    local git_name="$5" git_email="$6" sync_starship="$7" sync_ssh="$8"
     local brew_prefix="/opt/homebrew"
     [ "$(uname -m)" != "arm64" ] && brew_prefix="/usr/local"
 
@@ -338,12 +352,15 @@ write_chezmoi_toml() {
     git_name="${git_name//\"/}"
     git_email="${git_email//\"/}"
 
+    local run_install_pipeline="false"
+    [ "$install_mode" = "1" ] && run_install_pipeline="true"
+
     local is_mobile=false is_studio=false is_work=false
-    local is_heavy=false needs_enterprise=false is_always_on=false
+    local is_heavy=false is_always_on=false
     case "$role_str" in
         mobile) is_mobile=true ;;
         studio) is_studio=true; is_heavy=true; is_always_on=true ;;
-        work)   is_work=true;   is_heavy=true; needs_enterprise=true ;;
+        work)   is_work=true;   is_heavy=true ;;
     esac
 
     ensure mkdir -p "$HOME/.config/chezmoi"
@@ -356,6 +373,8 @@ recipient = "age1gu9dhr2az6ndjxdy00rf29r2aqaw9skm8683n0ds08mzlqv9p3gq8u7wts"
 
 [data]
 roleNum = $role_num
+installMode = $install_mode
+needsTencentIntranet = $needs_intranet
 role = "$role_str"
 name = "$git_name"
 email = "$git_email"
@@ -367,11 +386,13 @@ proxyClashUrl = "${PROXY_CLASH_URL:-}"
 proxyShadowrocketUrl = "${PROXY_SHADOWROCKET_URL:-}"
 
 [data.roleFlags]
+runInstallPipeline = $run_install_pipeline
+needsTencentIntranet = $needs_intranet
 isMobile = $is_mobile
 isStudio = $is_studio
 isWork = $is_work
 isHeavy = $is_heavy
-needsEnterprise = $needs_enterprise
+needsEnterprise = $needs_intranet
 isAlwaysOn = $is_always_on
 EOF
     ok "已生成 $HOME/.config/chezmoi/chezmoi.toml"
