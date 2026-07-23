@@ -599,8 +599,18 @@ apply_dotfiles() {
         ok "run_once 状态已清空,装机脚本将全部重跑"
     fi
 
-    info "正在启动 chezmoi apply 引擎，进入装机流水线..."
-    ensure chezmoi init --apply --guess-repo-url=false --force --source="$src"
+    if [ "${ANS_INSTALL_MODE:-1}" = "2" ]; then
+        info "正在进入互动对齐模式 (Interactive Mode)..."
+        hint "遇到有冲突的文件，Chezmoi 会逐一询问你:"
+        hint "按 'd' 查看红绿 Diff，按 'a' 确认覆盖，按 's' 跳过不覆盖"
+        # 先 init (不 apply)
+        ensure chezmoi init --guess-repo-url=false --source="$src"
+        # 再交互式 apply
+        ensure chezmoi apply --interactive
+    else
+        info "正在启动 chezmoi apply 引擎，进入全量装机流水线..."
+        ensure chezmoi init --apply --guess-repo-url=false --force --source="$src"
+    fi
 }
 
 # ─── 用户扩展 hook (thoughtbot 模式) ────────────────────────────────────
