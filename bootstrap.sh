@@ -576,7 +576,7 @@ show_finish() {
     if [ -s "$retry" ]; then
         action "重试失败软件: bash bootstrap.sh retry"
     fi
-    action "打开桌面「🍉 Mac 装机」文件夹,按 01→05 依次完成"
+    action "打开桌面「🍉 Mac 装机」文件夹，按编号依次完成最后的配置"
     hint "  日志: ~/.local/state/dotfiles-install-logs/"
     echo ""
 }
