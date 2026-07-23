@@ -367,7 +367,15 @@ collect_answers() {
     ok "SSH 同步: $sync_ssh"
     echo ""
 
-    write_chezmoi_toml "$role_num" "$role_str" "$install_mode" "$needs_intranet" "$git_name" "$git_email" "$sync_starship" "$sync_ssh"
+    ANS_ROLE_NUM="$role_num"
+    ANS_ROLE_STR="$role_str"
+    ANS_INSTALL_MODE="$install_mode"
+    ANS_NEEDS_INTRANET="$needs_intranet"
+    ANS_GIT_NAME="$git_name"
+    ANS_GIT_EMAIL="$git_email"
+    ANS_SYNC_STARSHIP="$sync_starship"
+    ANS_SYNC_SSH="$sync_ssh"
+    ANS_COLLECTED="true"
 }
 
 write_chezmoi_toml() {
@@ -589,6 +597,9 @@ cmd_install() {
 
     stage "2/4" "身份与密钥" "解密 vault / age 私钥 / GitHub 凭证"
     decrypt_vault
+    if [ "${ANS_COLLECTED:-false}" = "true" ]; then
+        write_chezmoi_toml "$ANS_ROLE_NUM" "$ANS_ROLE_STR" "$ANS_INSTALL_MODE" "$ANS_NEEDS_INTRANET" "$ANS_GIT_NAME" "$ANS_GIT_EMAIL" "$ANS_SYNC_STARSHIP" "$ANS_SYNC_SSH"
+    fi
     install_age_key
     install_github_creds
 
