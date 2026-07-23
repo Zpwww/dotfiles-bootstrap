@@ -426,15 +426,15 @@ fetch_source() {
     local tmp_tar; tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
     local rc=0
     # --max-time 60 是硬顶: 无论连不上/连上不返回/半速传/DNS 挂, 60s 必退
-    # -# 显示进度条, 让用户能看到是"在传"还是"卡死"
+    # -sS 显示进度条, 让用户能看到是"在传"还是"卡死"
     if [ -n "${GITHUB_TOKEN:-}" ]; then
-        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -# \
+        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
              -H "Authorization: Bearer $GITHUB_TOKEN" \
              -H "Accept: application/vnd.github+json" \
              -H "X-GitHub-Api-Version: 2022-11-28" \
              -o "$tmp_tar" "$api_url" || rc=$?
     else
-        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -# \
+        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
              -o "$tmp_tar" "$api_url" || rc=$?
     fi
     if [ "$rc" -eq 0 ] && [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
@@ -454,11 +454,11 @@ fetch_source() {
     tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
     rc=0
     if [ -n "${GITHUB_TOKEN:-}" ]; then
-        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -# \
+        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
              -H "Authorization: Bearer $GITHUB_TOKEN" \
              -o "$tmp_tar" "$archive_url" || rc=$?
     else
-        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -# \
+        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
              -o "$tmp_tar" "$archive_url" || rc=$?
     fi
     if [ "$rc" -eq 0 ] && [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
