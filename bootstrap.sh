@@ -541,7 +541,7 @@ apply_dotfiles() {
         ok "run_once 状态已清空,装机脚本将全部重跑"
     fi
 
-    section "应用 dotfiles (触发装软件 + 个人偏好同步)"
+    info "正在启动 chezmoi apply 引擎，进入装机流水线..."
     ensure chezmoi init --apply --guess-repo-url=false --force --source="$src"
 }
 
