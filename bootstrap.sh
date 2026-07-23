@@ -152,7 +152,13 @@ curl_with_spinner() {
 # ─── 临时目录 ──────────────────────────────────────────────────────────
 TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t bootstrap)"
 _cleanup() {
-    sudo rm -f "/private/etc/sudoers.d/dotfiles-bootstrap-global" 2>/dev/null || true
+    if [ "${CLEANUP_DONE:-}" = "true" ]; then
+        return
+    fi
+    CLEANUP_DONE="true"
+    if sudo -n true 2>/dev/null; then
+        sudo rm -f "/private/etc/sudoers.d/dotfiles-bootstrap-global" 2>/dev/null || true
+    fi
     rm -rf "$TMP_DIR" 2>/dev/null || true
     [ -n "${SUDO_PID:-}" ] && kill "$SUDO_PID" 2>/dev/null || true
 }
