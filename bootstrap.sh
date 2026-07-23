@@ -35,8 +35,8 @@ export HOMEBREW_NO_INSTALL_CLEANUP=1
 
 # ─── 输出层: 只有 4 个函数,前缀式,自动降级无色 (starship 风格) ────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-    C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'
-    C_BLUE=$'\033[36m'; C_DIM=$'\033[2m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
+    C_GREEN=$'[38;2;0;158;115m'; C_YELLOW=$'[38;2;230;159;0m'; C_RED=$'[38;2;213;94;0m'
+    C_BLUE=$'[38;2;86;180;233m'; C_DIM=$'\033[2m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
 else
     C_GREEN=''; C_YELLOW=''; C_RED=''; C_BLUE=''; C_DIM=''; C_BOLD=''; C_RESET=''
 fi
