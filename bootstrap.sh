@@ -295,39 +295,43 @@ collect_answers() {
     info "回答 7 个问题 (只问一次,答案存到 $toml)"
     echo ""
 
-    ask_choice "① 机器角色?" "${ROLE_LABELS[@]}"
-    local role_num="$REPLY"
-    local role_str="${ROLE_KEYS[$((role_num - 1))]}"
-    ok "已选: ${ROLE_LABELS[$((role_num - 1))]}"
-    echo ""
-
-    ask_choice "② 你想如何配置这台机器?" "完整装机(全新电脑)" "仅对齐配置(旧电脑)"
+    ask_choice "你想如何配置这台机器?" "完整装机(全新电脑)" "仅对齐配置(旧电脑)"
     local install_mode="$REPLY"
     [ "$install_mode" = "1" ] && ok "已选: 完整装机" || ok "已选: 仅对齐配置"
     echo ""
 
+    local role_num=3
+    local role_str="work"
+    if [ "$install_mode" = "1" ]; then
+        ask_choice "机器角色?" "${ROLE_LABELS[@]}"
+        role_num="$REPLY"
+        role_str="${ROLE_KEYS[$((role_num - 1))]}"
+        ok "已选: ${ROLE_LABELS[$((role_num - 1))]}"
+        echo ""
+    fi
+
     local ioa_default="n"
     [ "$role_str" = "work" ] && ioa_default="y"
     local needs_intranet="false"
-    if confirm "③ 是否需要配置腾讯办公内网(iOA, WeTERM 等)?" "$ioa_default"; then
+    if confirm "是否需要配置腾讯办公内网(iOA, WeTERM 等)?" "$ioa_default"; then
         needs_intranet="true"
     fi
     ok "腾讯内网: $needs_intranet"
     echo ""
 
-    ask "④ Git 用户名 (回车默认 $GITHUB_USERNAME)" ""
+    ask "Git 用户名 (回车默认 $GITHUB_USERNAME)" ""
     local git_name="$REPLY"
     [ -z "$git_name" ] && git_name="$GITHUB_USERNAME"
     ok "已设: $git_name"
     echo ""
 
-    ask "⑤ Git 邮箱 (回车跳过)" ""
+    ask "Git 邮箱 (回车跳过)" ""
     local git_email="$REPLY"
     [ -z "$git_email" ] && ok "已跳过邮箱" || ok "已设: $git_email"
     echo ""
 
     local sync_starship="true"
-    if ! confirm "⑥ 同步 starship 终端样式?" "y"; then
+    if ! confirm "同步 starship 终端样式?" "y"; then
         sync_starship="false"
     fi
     ok "starship 同步: $sync_starship"
@@ -336,7 +340,7 @@ collect_answers() {
     local ssh_default="n"
     [ -f "$HOME/.config/chezmoi/key.txt" ] && ssh_default="y"
     local sync_ssh="false"
-    if confirm "⑦ 同步 SSH 配置? (需 age 私钥)" "$ssh_default"; then
+    if confirm "同步 SSH 配置? (需 age 私钥)" "$ssh_default"; then
         sync_ssh="true"
     fi
     ok "SSH 同步: $sync_ssh"
@@ -403,11 +407,11 @@ EOF
 
 # ─── chezmoi 应用 ──────────────────────────────────────────────────────
 # fetch_source: 依次尝试 3 种获取方式,首个成功即返回。
-#   ① API tarball 端点 (api.github.com/repos/.../tarball) — 对 fine-grained
+#   API tarball 端点 (api.github.com/repos/.../tarball) — 对 fine-grained
 #      token 支持最全, 走 302 重定向, curl -L 自动跟。
-#   ② archive 端点 (github.com/.../archive/refs/heads/main.tar.gz) — 部分
+#   archive 端点 (github.com/.../archive/refs/heads/main.tar.gz) — 部分
 #      fine-grained token 权限不匹配会 404, 兜底方案。
-#   ③ git clone HTTPS + token 嵌入 URL — 最原始的方式, chezmoi 也这么做。
+#   git clone HTTPS + token 嵌入 URL — 最原始的方式, chezmoi 也这么做。
 fetch_source() {
     local dst="$1"
     local api_url="https://api.github.com/repos/${DOTFILES_SLUG}/tarball/main"
@@ -417,7 +421,7 @@ fetch_source() {
         warn "GITHUB_TOKEN 不存在,只能尝试公开仓路径"
     fi
 
-    # ─── 方式 ①: API tarball (推荐,对 fine-grained token 最友好) ───
+    # ─── 方式 : API tarball (推荐,对 fine-grained token 最友好) ───
     info "尝试 API tarball 端点 (60s 超时)..."
     local tmp_tar; tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
     local rc=0
@@ -445,7 +449,7 @@ fetch_source() {
     rm -f "$tmp_tar"
     warn "API tarball 失败(rc=$rc),尝试 archive 端点..."
 
-    # ─── 方式 ②: archive 端点 ───
+    # ─── 方式 : archive 端点 ───
     info "尝试 archive 端点 (60s 超时)..."
     tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
     rc=0
@@ -469,7 +473,7 @@ fetch_source() {
     rm -f "$tmp_tar"
     warn "archive 失败(rc=$rc),尝试 git clone..."
 
-    # ─── 方式 ③: git clone with token in URL ───
+    # ─── 方式 : git clone with token in URL ───
     rm -rf "$dst" 2>/dev/null
     local clone_url="https://github.com/${DOTFILES_SLUG}.git"
     if [ -n "${GITHUB_TOKEN:-}" ]; then
