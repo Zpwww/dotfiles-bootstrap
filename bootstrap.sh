@@ -152,9 +152,11 @@ curl_with_spinner() {
 # ─── 临时目录 ──────────────────────────────────────────────────────────
 TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t bootstrap)"
 _cleanup() {
+    sudo rm -f "/private/etc/sudoers.d/dotfiles-bootstrap-global" 2>/dev/null || true
     rm -rf "$TMP_DIR" 2>/dev/null || true
     [ -n "${SUDO_PID:-}" ] && kill "$SUDO_PID" 2>/dev/null || true
 }
+trap '_cleanup; exit 130' INT TERM
 trap _cleanup EXIT
 
 # ─── 权限 ──────────────────────────────────────────────────────────────
@@ -167,15 +169,30 @@ check_admin() {
 }
 
 acquire_sudo() {
-    if sudo -n true 2>/dev/null; then
-        ok "已有管理员权限"
-        return
+    if ! sudo -n true 2>/dev/null; then
+        info "需要管理员权限,请输入 Mac 开机密码 (仅此一次,后续操作自动免密):"
+        ensure sudo -v
     fi
-    info "需要管理员权限,请输入 Mac 开机密码 (仅此一次,后续操作自动免密):"
-    ensure sudo -v
+    
+    # 注入全局临时免密规则，彻底绕过 macOS tty_tickets 导致子进程要密码的问题
+    local user
+    user="$(id -un)"
+    local sudoers_file="/private/etc/sudoers.d/dotfiles-bootstrap-global"
+    if [ ! -f "$sudoers_file" ]; then
+        local tmp_sudoers
+        tmp_sudoers="$(mktemp)"
+        echo "$user ALL=(ALL) NOPASSWD: ALL" > "$tmp_sudoers"
+        if sudo visudo -cf "$tmp_sudoers" >/dev/null 2>&1; then
+            sudo cp "$tmp_sudoers" "$sudoers_file"
+            sudo chown root:wheel "$sudoers_file"
+            sudo chmod 440 "$sudoers_file"
+        fi
+        rm -f "$tmp_sudoers"
+    fi
+    
     ( set +e; while true; do sudo -n -v 2>/dev/null || true; sleep 30; kill -0 "$$" 2>/dev/null || exit; done ) &
     SUDO_PID=$!
-    ok "已获取管理员权限"
+    ok "已获取管理员免密权限"
 }
 
 # ─── 依赖安装 ──────────────────────────────────────────────────────────
