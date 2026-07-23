@@ -374,8 +374,10 @@ collect_answers() {
     ok "starship 同步: $sync_starship"
     echo ""
 
-    local ssh_default="n"
-    [ -f "$HOME/.config/chezmoi/key.txt" ] && ssh_default="y"
+    local ssh_default="y"
+    if [ "$install_mode" = "sync_only" ]; then
+        ssh_default="n"
+    fi
     local sync_ssh="false"
     if confirm "同步 SSH 配置? (需 age 私钥)" "$ssh_default"; then
         sync_ssh="true"
