@@ -548,6 +548,9 @@ show_finish() {
 
 # ─── 命令入口 ───────────────────────────────────────────────────────────
 cmd_install() {
+    # 提前回答配置意图，提升用户体验 (让用户觉得是“先规划再执行”)
+    collect_answers
+
     stage "1/4" "环境准备" "管理员权限 / Xcode CLT / Homebrew / 核心工具"
     check_admin
     acquire_sudo
@@ -556,11 +559,10 @@ cmd_install() {
     install_core_tools
     persist_shellenv
 
-    stage "2/4" "身份与密钥" "解密 vault / age 私钥 / GitHub 凭证 / 5 题选择"
+    stage "2/4" "身份与密钥" "解密 vault / age 私钥 / GitHub 凭证"
     decrypt_vault
     install_age_key
     install_github_creds
-    collect_answers
 
     stage "3/4" "装软件与配置" "拉源码 / brew 软件包 / VS Code 插件 / 个人偏好"
     apply_dotfiles
