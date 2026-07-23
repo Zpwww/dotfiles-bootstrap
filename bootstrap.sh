@@ -132,7 +132,7 @@ _cleanup() {
     rm -rf "$TMP_DIR" 2>/dev/null || true
     [ -n "${SUDO_PID:-}" ] && kill "$SUDO_PID" 2>/dev/null || true
 }
-trap _cleanup EXIT INT TERM
+trap _cleanup EXIT
 
 # ─── 权限 ──────────────────────────────────────────────────────────────
 check_admin() {
