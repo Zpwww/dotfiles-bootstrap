@@ -604,7 +604,7 @@ apply_dotfiles() {
         ensure chezmoi init --guess-repo-url=false --source="$src"
         
         local changed_files
-        changed_files=$(chezmoi status | grep -E '^ M|^ A|^ D|^ R' | awk '{print $2}')
+        changed_files=$(chezmoi status | grep -E '^.[MADR] ' | sed 's/^...//')
         
         if [ -z "$changed_files" ]; then
             ok "所有配置均已最新，无需覆盖。"
