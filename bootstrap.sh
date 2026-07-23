@@ -82,7 +82,9 @@ confirm() {
     if [ -n "$NONINTERACTIVE" ]; then
         [ "$default" = "y" ]; return $?
     fi
-    printf '%s?%s %s [y/N]: ' "$C_YELLOW" "$C_RESET" "$prompt" >&2
+    local hint="[y/N]"
+    [ "$default" = "y" ] && hint="[Y/n]"
+    printf '%s?%s %s %s: ' "$C_YELLOW" "$C_RESET" "$prompt" "$hint" >&2
     read -r reply </dev/tty || reply=""
     [ -z "$reply" ] && reply="$default"
     case "$reply" in Y|y|yes|Yes) return 0 ;; *) return 1 ;; esac
