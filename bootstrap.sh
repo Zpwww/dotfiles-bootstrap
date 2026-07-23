@@ -229,13 +229,13 @@ install_brew() {
 }
 
 install_core_tools() {
-    local pkgs="age git chezmoi gh"
+    local pkgs="age git chezmoi gh gum"
     local missing=""
     for p in $pkgs; do
         brew list "$p" >/dev/null 2>&1 || missing="$missing $p"
     done
     if [ -z "$missing" ]; then
-        ok "核心工具已就绪 (age/git/chezmoi/gh)"
+        ok "核心工具已就绪 (age/git/chezmoi/gh/gum)"
         return
     fi
     info "安装核心工具:$missing"
@@ -600,13 +600,28 @@ apply_dotfiles() {
     fi
 
     if [ "${ANS_INSTALL_MODE:-1}" = "2" ]; then
-        info "正在进入互动对齐模式 (Interactive Mode)..."
-        hint "遇到有冲突的文件，Chezmoi 会逐一询问你:"
-        hint "按 'd' 查看红绿 Diff，按 'a' 确认覆盖，按 's' 跳过不覆盖"
-        # 先 init (不 apply)
+        info "正在检测本地与云端配置差异..."
         ensure chezmoi init --guess-repo-url=false --source="$src"
-        # 再交互式 apply
-        ensure chezmoi apply --interactive
+        
+        local changed_files
+        changed_files=$(chezmoi status | grep -E '^ M|^ A|^ D|^ R' | awk '{print $2}')
+        
+        if [ -z "$changed_files" ]; then
+            ok "所有配置均已最新，无需覆盖。"
+        else
+            info "请在弹出的列表中勾选需要覆盖同步的文件 (按 空格 勾选，按 回车 确认):"
+            local selected_files
+            selected_files=$(echo "$changed_files" | gum choose --no-limit --header="[空格] 勾选 / [回车] 确认")
+            
+            if [ -n "$selected_files" ]; then
+                echo "$selected_files" | while IFS= read -r f; do
+                    [ -n "$f" ] && chezmoi apply "$f"
+                done
+                ok "已成功应用选中的配置项。"
+            else
+                warn "未勾选任何文件，已跳过同步。"
+            fi
+        fi
     else
         info "正在启动 chezmoi apply 引擎，进入全量装机流水线..."
         ensure chezmoi init --apply --guess-repo-url=false --force --source="$src"
