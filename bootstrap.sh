@@ -340,13 +340,11 @@ collect_answers() {
 
     local role_num=3
     local role_str="work"
-    if [ "$install_mode" = "1" ]; then
-        ask_choice "机器角色?" "${ROLE_LABELS[@]}"
-        role_num="$REPLY"
-        role_str="${ROLE_KEYS[$((role_num - 1))]}"
-        ok "已选: ${ROLE_LABELS[$((role_num - 1))]}"
-        echo ""
-    fi
+    ask_choice "机器角色?" "${ROLE_LABELS[@]}"
+    role_num="$REPLY"
+    role_str="${ROLE_KEYS[$((role_num - 1))]}"
+    ok "已选: ${ROLE_LABELS[$((role_num - 1))]}"
+    echo ""
 
     local ioa_default="y"
     local needs_intranet="false"
