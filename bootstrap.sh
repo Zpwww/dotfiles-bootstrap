@@ -313,8 +313,9 @@ collect_answers() {
     ok "腾讯内网: $needs_intranet"
     echo ""
 
-    ask "④ Git 用户名" "$GITHUB_USERNAME"
+    ask "④ Git 用户名 (回车默认 $GITHUB_USERNAME)" ""
     local git_name="$REPLY"
+    [ -z "$git_name" ] && git_name="$GITHUB_USERNAME"
     ok "已设: $git_name"
     echo ""
 
