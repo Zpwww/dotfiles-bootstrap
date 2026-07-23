@@ -173,7 +173,7 @@ acquire_sudo() {
     fi
     info "需要管理员权限,请输入 Mac 开机密码 (仅此一次,后续操作自动免密):"
     ensure sudo -v
-    ( set +e; while true; do sudo -n true 2>/dev/null || true; sleep 30; kill -0 "$$" 2>/dev/null || exit; done ) &
+    ( set +e; while true; do sudo -n -v 2>/dev/null || true; sleep 30; kill -0 "$$" 2>/dev/null || exit; done ) &
     SUDO_PID=$!
     ok "已获取管理员权限"
 }
