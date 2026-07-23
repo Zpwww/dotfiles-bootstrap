@@ -379,7 +379,7 @@ collect_answers() {
     echo ""
 
     local ssh_default="y"
-    if [ "$install_mode" = "sync_only" ]; then
+    if [ "$install_mode" = "2" ]; then
         ssh_default="n"
     fi
     local sync_ssh="false"
@@ -389,6 +389,31 @@ collect_answers() {
     ok "SSH 同步: $sync_ssh"
     echo ""
 
+    local sync_macos="true"
+    local sync_core="true"
+    local sync_apps="true"
+    if [ "$install_mode" = "2" ]; then
+        info "请选择要覆盖同步的配置域:"
+        if confirm "同步 macOS 系统偏好? (Dock, 触控板, 快捷键等)" "n"; then
+            sync_macos="true"
+        else
+            sync_macos="false"
+        fi
+        
+        if confirm "同步核心终端配置? (Zsh, Git 等)" "y"; then
+            sync_core="true"
+        else
+            sync_core="false"
+        fi
+        
+        if confirm "同步应用偏好设置? (VS Code, Raycast 等)" "y"; then
+            sync_apps="true"
+        else
+            sync_apps="false"
+        fi
+        echo ""
+    fi
+
     ANS_ROLE_NUM="$role_num"
     ANS_ROLE_STR="$role_str"
     ANS_INSTALL_MODE="$install_mode"
@@ -397,12 +422,16 @@ collect_answers() {
     ANS_GIT_EMAIL="$git_email"
     ANS_SYNC_STARSHIP="$sync_starship"
     ANS_SYNC_SSH="$sync_ssh"
+    ANS_SYNC_MACOS="$sync_macos"
+    ANS_SYNC_CORE="$sync_core"
+    ANS_SYNC_APPS="$sync_apps"
     ANS_COLLECTED="true"
 }
 
 write_chezmoi_toml() {
     local role_num="$1" role_str="$2" install_mode="$3" needs_intranet="$4"
     local git_name="$5" git_email="$6" sync_starship="$7" sync_ssh="$8"
+    local sync_macos="${9}" sync_core="${10}" sync_apps="${11}"
     local brew_prefix="/opt/homebrew"
     [ "$(uname -m)" != "arm64" ] && brew_prefix="/usr/local"
 
@@ -438,6 +467,9 @@ name = "$git_name"
 email = "$git_email"
 syncStarship = $sync_starship
 syncSshConfig = $sync_ssh
+syncMacOs = $sync_macos
+syncCore = $sync_core
+syncApps = $sync_apps
 brewPrefix = "$brew_prefix"
 tabbyToken = "${TABBY_TOKEN:-}"
 proxyClashUrl = "${PROXY_CLASH_URL:-}"
@@ -452,6 +484,9 @@ isWork = $is_work
 isHeavy = $is_heavy
 needsEnterprise = $needs_intranet
 isAlwaysOn = $is_always_on
+syncMacOs = $sync_macos
+syncCore = $sync_core
+syncApps = $sync_apps
 EOF
     ok "已生成 $HOME/.config/chezmoi/chezmoi.toml"
 }
@@ -620,7 +655,7 @@ cmd_install() {
     stage "2/4" "身份与密钥" "解密 vault / age 私钥 / GitHub 凭证"
     decrypt_vault
     if [ "${ANS_COLLECTED:-false}" = "true" ]; then
-        write_chezmoi_toml "$ANS_ROLE_NUM" "$ANS_ROLE_STR" "$ANS_INSTALL_MODE" "$ANS_NEEDS_INTRANET" "$ANS_GIT_NAME" "$ANS_GIT_EMAIL" "$ANS_SYNC_STARSHIP" "$ANS_SYNC_SSH"
+        write_chezmoi_toml "$ANS_ROLE_NUM" "$ANS_ROLE_STR" "$ANS_INSTALL_MODE" "$ANS_NEEDS_INTRANET" "$ANS_GIT_NAME" "$ANS_GIT_EMAIL" "$ANS_SYNC_STARSHIP" "$ANS_SYNC_SSH" "$ANS_SYNC_MACOS" "$ANS_SYNC_CORE" "$ANS_SYNC_APPS"
     fi
     install_age_key
     install_github_creds
