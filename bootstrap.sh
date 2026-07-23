@@ -331,8 +331,7 @@ collect_answers() {
         echo ""
     fi
 
-    local ioa_default="n"
-    [ "$role_str" = "work" ] && ioa_default="y"
+    local ioa_default="y"
     local needs_intranet="false"
     if confirm "是否需要配置腾讯办公内网(iOA, WeTERM 等)?" "$ioa_default"; then
         needs_intranet="true"
