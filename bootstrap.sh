@@ -128,6 +128,27 @@ ask_choice() {
     done
 }
 
+curl_with_spinner() {
+    local tmp_err; tmp_err="$(mktemp -t curl_err.XXXXXX)"
+    "$@" 2> "$tmp_err" &
+    local pid=$!
+    local spin='-\|/'
+    local i=0
+    while kill -0 $pid 2>/dev/null; do
+        i=$(( (i+1) % 4 ))
+        printf "\r%s> 正在下载 [%c]%s" "$C_BLUE" "${spin:$i:1}" "$C_RESET" >&2
+        sleep 0.1
+    done
+    wait $pid
+    local rc=$?
+    printf "\r\033[K" >&2
+    if [ $rc -ne 0 ] && [ -s "$tmp_err" ]; then
+        cat "$tmp_err" >&2
+    fi
+    rm -f "$tmp_err"
+    return $rc
+}
+
 # ─── 临时目录 ──────────────────────────────────────────────────────────
 TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t bootstrap)"
 _cleanup() {
@@ -428,13 +449,13 @@ fetch_source() {
     # --max-time 60 是硬顶: 无论连不上/连上不返回/半速传/DNS 挂, 60s 必退
     # -sS 显示进度条, 让用户能看到是"在传"还是"卡死"
     if [ -n "${GITHUB_TOKEN:-}" ]; then
-        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
+        curl_with_spinner -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
              -H "Authorization: Bearer $GITHUB_TOKEN" \
              -H "Accept: application/vnd.github+json" \
              -H "X-GitHub-Api-Version: 2022-11-28" \
              -o "$tmp_tar" "$api_url" || rc=$?
     else
-        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
+        curl_with_spinner -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
              -o "$tmp_tar" "$api_url" || rc=$?
     fi
     if [ "$rc" -eq 0 ] && [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
@@ -454,11 +475,11 @@ fetch_source() {
     tmp_tar="$(mktemp -t chezmoi_src.tar.gz.XXXXXX)"
     rc=0
     if [ -n "${GITHUB_TOKEN:-}" ]; then
-        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
+        curl_with_spinner -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
              -H "Authorization: Bearer $GITHUB_TOKEN" \
              -o "$tmp_tar" "$archive_url" || rc=$?
     else
-        curl -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
+        curl_with_spinner -fL --connect-timeout 10 --max-time 60 --speed-limit 10240 --speed-time 15 -sS \
              -o "$tmp_tar" "$archive_url" || rc=$?
     fi
     if [ "$rc" -eq 0 ] && [ -s "$tmp_tar" ] && tar -tzf "$tmp_tar" >/dev/null 2>&1; then
