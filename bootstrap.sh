@@ -624,6 +624,10 @@ apply_dotfiles() {
         fi
     else
         info "正在启动 chezmoi apply 引擎，进入全量装机流水线..."
+# 防止上一次装机中途被强退后残留的后台僵尸进程（caffeinate/sudo）占用 chezmoi 的锁
+echo "   -> 🧹 正在清理可能残留的后台进程 (如曾强制退出)..."
+pkill -U "$USER" -9 -f 'caffeinate|chezmoi|install_brew' 2>/dev/null || true
+
         ensure chezmoi init --apply --guess-repo-url=false --force --source="$src"
     fi
 }
